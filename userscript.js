@@ -29,16 +29,11 @@ const usercfg = {
 const cfg = {
   domainWhiteList: [
       'svvs.contact-centre.ru', 'ek5.cdek.ru', 'preorderec5.cdek.ru', 'singleadvicewindowng.cdek.ru',
-      'messagerequestscreateformng.cdek.ru',
+      //'messagerequestscreateformng.cdek.ru',
   ],
 };
 const l = console.log;
 const qw = l;
-const pause = function (intervalMs) {
-  return new Promise(resolve => {
-    setTimeout(resolve, intervalMs);
-  });
-};
 const affirm = function (boolean, message) {
   if (boolean) return;
   throw new Error(message);
@@ -65,15 +60,22 @@ const addSafeObserver = function (element, options, callback) {
   mo.observe(element, options);
   return mo;
 };
-
+const setSafeInterval = function (callback, intervalMs) {
+  return setInterval(attempt.bind(null, callback, tools.defaultCatchCallback), intervalMs);
+};
 const pollingSelector = function (element, selector, intervalMs=1000) {
-  return new Promise(function (resolve) {
+  return new Promise(function (resolve, reject) {
     const resultElement = element.querySelector(selector);
     if (resultElement !== null) {
         resolve(resultElement);
         return;
     }
+    let counter = 0;
     const intervalId = setInterval(function () {
+      if (++counter > 60) {
+        clearInterval(intervalId);
+        reject(new Error('Превышено время ожидания pollingSelector.'));
+      }
       console.log('wfo polling selector: ', selector)
       const resultElement = element.querySelector(selector);
       if (resultElement === null) return;
@@ -83,13 +85,18 @@ const pollingSelector = function (element, selector, intervalMs=1000) {
   });
 };
 const pollingSelectorAll = function (element, selector, len=1, intervalMs=1000) {
-  return new Promise(function (resolve) {
+  return new Promise(function (resolve, reject) {
     const resultCollection = element.querySelectorAll(selector);
     if (resultCollection.length >= len) {
         resolve(resultCollection);
         return;
     }
+    let counter = 0;
     const intervalId = setInterval(function () {
+        if (++counter > 60) {
+        clearInterval(intervalId);
+        reject(new Error('Превышено время ожидания pollingSelectorAll.'));
+      }
       console.log('wfo polling selector all: ', selector)
       const resultCollection = element.querySelectorAll(selector);
       if (resultCollection.length < len) return;
@@ -108,21 +115,30 @@ const tools = {
   defaultCatchCallback(error) {
     alert("Ошибка в юзерскрипте:\n\n" + error.stack);
   },
+  pause(intervalMs) {
+    return new Promise(resolve => {
+      setTimeout(resolve, intervalMs);
+    });
+  },
+
 };
 const main = {
   async run() {
     const domain = main.getDomainFromWhiteList(location.href);
     if (domain === false) return;
     usercfg.loadFromStorage();
-    menu.establish();
     await main.manageScripts(domain);
   },
   async manageScripts(domain) {
+    if (domain === 'svvs.contact-centre.ru') {
+      // svvs.establishAutoupdate();
+    }
     if (domain === 'ek5.cdek.ru') {
-
+      // menu.establish();
     }
     if (domain === 'singleadvicewindowng.cdek.ru') {
       eok.establishCollapsedAreasAutoOpening();
+      eok.markMultiplePlaces();
     }
     if (domain === 'preorderec5.cdek.ru' && !location.href.includes('gate.html')) {
       await preorder.resetRequestFilter();
@@ -144,7 +160,21 @@ const main = {
 };
 const menu = {
   establish() {
+    addSafeListener(document, 'keydown', event => {
+      if (!event.altKey || event.key !== 'End' || event.repeat) return;
+      const mainChoice = menu.prompt(['Активация/деактивация скриптов']);
+      if (mainChoice === null) return;
+      if (mainChoice === 1) {
+        const scriptChoice = menu.prompt([
+          'ЕОК: Автоматическое открытие областей об оплате и грузоместах',
+          'ЕОК: Окрашивание блока о готовых к выдаче местах, если в заказе более 1 места',
+          'Журнал заявок: Автоматический сброс фильтров',
+          'Журнал заявок: Инъекция идентификатора заявки в поле фильтра',
+        ]);
+        if (scriptChoice === null) return;
 
+      }
+    });
   },
   prompt(options) {
 	var text = 'Введите номер пункта, который нужно выполнить:\n\n';
@@ -176,14 +206,14 @@ const eok = {
       const collapsePlacesBtn = claim(type.element, await pollingSelector(document, '#CollapsePlacesBtn') );
       const appCards = claim(type.nodeList, document.querySelectorAll('app-card')); // no need pollingSelector, appCards are parents of buttons
       affirm(appCards.length === 2, 'Обнаружено более или менее двух app-card.');
-      const paymentIntervalId = setInterval( () => {
+      const paymentIntervalId = setSafeInterval( () => {
         if (appCards[0].className.includes('collapsed')) {
           collapsePaymentBtn.dispatchEvent(new Event('click'));
           return;
         }
         clearInterval(paymentIntervalId);
       }, 500);
-      const placesIntervalId = setInterval( () => {
+      const placesIntervalId = setSafeInterval( () => {
         if (appCards[1].className.includes('collapsed')) {
           collapsePlacesBtn.dispatchEvent(new Event('click'));
           return;
@@ -192,7 +222,29 @@ const eok = {
       }, 500);
     });
   },
-
+  async markMultiplePlaces() {
+    const body = await pollingSelector(document, 'body');
+    addSafeObserver(body, { attributes:true, attributeOldValue:true }, async records => {
+      if (records[0].oldValue !== 'overflowHidden') return;
+      const titleDivs = claim(type.nodeList, await pollingSelectorAll(document, 'div[class=title]', 15) );
+      let placesTitleDiv;
+      for (let div of titleDivs) {
+        if (div.innerText.includes('отово к выдаче')) {
+          placesTitleDiv = div;
+          break;
+        }
+      }
+      affirm(type.element(placesTitleDiv), "Не обнаружен placesTitleDiv.");
+      const sibling = claim(type.element, placesTitleDiv.nextElementSibling);
+      affirm(sibling.innerText.includes(' из '), 'placesTitleDiv.nextElementSibling.innerText не содержит " из ".');
+      const splitted = sibling.innerText.split(' из ');
+      if (splitted.pop() === '1') {
+        sibling.style.backgroundColor = '';
+        return;
+      }
+      sibling.style.backgroundColor = 'orange';
+    });
+  },
 };
 const preorder = {
   async resetRequestFilter() {
@@ -209,6 +261,7 @@ const preorder = {
     const requestFilterInput = claim(type.element, await pollingSelector(document, '#requestFilterInput') );
     // const findButton = claim(type.element, await pollingSelector(document, '#findButtonRequest') );
     requestFilterInput.setAttribute('value', id);
+    requestFilterInput.dispatchEvent(new Event('change', {bubbles:true}));
     // requestFilterInput.dispatchEvent(new Event('keydown', {key: 'Enter'}));
     //findButton.dispatchEvent(new Event('click'));
   },
@@ -249,5 +302,44 @@ const messagerequest = {
     affirm(type.element(NSKbutton), 'Не найдена кнопка НСК');
     NSKbutton.dispatchEvent(new Event('click'));
   },
+};
+const svvs = {
+  async establishAutoupdate() {
+    const storedOperatorDayTableInnerText = GM_getValue('operatorDayTableInnerText');
+    const operatorDayTable = claim(type.element, await pollingSelector(document, '.operator-day') );
+    if (storedOperatorDayTableInnerText !== operatorDayTable.innerText) {
+      if (document.hasFocus()) {
+        alert('Перерывы изменились.');
+        setTimeout(() => { location.href = location.href }, 8000);
+      }
+      else {
+        const title = document.querySelector('title');
+        const intervalId = svvs.startTitleToggling(title, 500);
+        addSafeListener(window, 'focus', () => {
+          svvs.stopTitleToggling(title, intervalId);
+          setTimeout(() => { location.href = location.href }, 8000);
+          //alert('Перерывы изменились.');
+        })
+      }
+    }
+  },
+   toggleTitle(titleElement, a, b) {
+     if (titleElement.innerText === a) {
+       titleElement.innerText = b;
+       return;
+     }
+     titleElement.innerText = a;
+   },
+   startTitleToggling(titleElement, intervalMs) {
+     return setSafeInterval(
+       svvs.toggleTitle.bind(svvs, titleElement, 'Изменение!', '-'),
+       intervalMs
+     );
+   },
+   async stopTitleToggling(titleElement, intervalId) {
+     clearInterval(intervalId);
+     await tools.pause(2000);
+     titleElement.innerText = 'СВВС';
+   },
 };
 attempt( main.run.bind(main), tools.defaultCatchCallback.bind(tools) );
