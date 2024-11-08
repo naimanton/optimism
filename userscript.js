@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         optimism: cdek/contact-centre
 // @namespace    http://tampermonkey.net/
-// @version      2024-11-02
+// @version      2024-11-09
 // @description  try to take over the world!
 // @author       You
 // @match        https://*/*
@@ -21,15 +21,14 @@ const usercfg = {
     }
     usercfg.data = JSON.parse(usercfgValue);
   },
-  setValue(name, value) {
-    usercfg.data[name] = value;
+  save() {
     GM_setValue('usercfg', JSON.stringify(usercfg.data));
   },
 };
 const cfg = {
   domainWhiteList: [
-      'svvs.contact-centre.ru', 'ek5.cdek.ru', 'preorderec5.cdek.ru', 'singleadvicewindowng.cdek.ru',
-      //'messagerequestscreateformng.cdek.ru',
+    'svvs.contact-centre.ru', 'ek5.cdek.ru', 'preorderec5.cdek.ru', 'singleadvicewindowng.cdek.ru',
+    //'messagerequestscreateformng.cdek.ru',
   ],
 };
 const l = console.log;
@@ -134,18 +133,26 @@ const main = {
       // svvs.establishAutoupdate();
     }
     if (domain === 'ek5.cdek.ru') {
-      // menu.establish();
+      menu.establish();
     }
     if (domain === 'singleadvicewindowng.cdek.ru') {
-      eok.establishCollapsedAreasAutoOpening();
-      eok.markMultiplePlaces();
+      if (usercfg.data.collapsedAreasAutoOpening && usercfg.data.collapsedAreasAutoOpening.active !== false) {
+        eok.establishCollapsedAreasAutoOpening();
+      }
+      if (usercfg.data.multiplePlacesMarking && usercfg.data.multiplePlacesMarking.active !== false) {
+        eok.markMultiplePlaces2();
+      }
     }
     if (domain === 'preorderec5.cdek.ru' && !location.href.includes('gate.html')) {
-      await preorder.resetRequestFilter();
+      if (usercfg.data.requestFilterReset && usercfg.data.requestFilterReset.active !== false) {
+        await preorder.resetRequestFilter();
+      }
       const splittedHref = location.href.split('/');
       const item = splittedHref.pop(); // id or string
       if (!isFinite(item)) return;
-      await preorder.setFilterValue(item);
+      if (usercfg.data.requestFilterValueSet && usercfg.data.requestFilterValueSet.active !== false) {
+        await preorder.setFilterValue(item);
+      }
     }
     if (domain === 'messagerequestscreateformng.cdek.ru') {
       // await messagerequest.chooseDefaultBranch();
@@ -165,16 +172,36 @@ const menu = {
       const mainChoice = menu.prompt(['Активация/деактивация скриптов']);
       if (mainChoice === null) return;
       if (mainChoice === 1) {
-        const scriptChoice = menu.prompt([
-          'ЕОК: Автоматическое открытие областей об оплате и грузоместах',
-          'ЕОК: Окрашивание блока о готовых к выдаче местах, если в заказе более 1 места',
-          'Журнал заявок: Автоматический сброс фильтров',
-          'Журнал заявок: Инъекция идентификатора заявки в поле фильтра',
-        ]);
-        if (scriptChoice === null) return;
-
+        menu.scriptToggling();
+        return;
       }
     });
+  },
+  scriptToggling() {
+    const scriptChoice = menu.prompt([
+      menu.get_isActive_prefix('collapsedAreasAutoOpening') + 'ЕОК: Автоматическое открытие областей об оплате и грузоместах',
+      menu.get_isActive_prefix('multiplePlacesMarking') + 'ЕОК: Окрашивание блока о готовых к выдаче местах, если в заказе более 1 места',
+      menu.get_isActive_prefix('requestFilterReset') + 'Журнал заявок: Автоматический сброс фильтров',
+      menu.get_isActive_prefix('requestFilterValueSet') + 'Журнал заявок: Инъекция идентификатора заявки в поле фильтра',
+    ]);
+    if (scriptChoice === 0) return;
+    menu.toggleScriptInUsercfg(scriptChoice);
+    alert('Для применения изменений обновите страницу.');
+  },
+  toggleScriptInUsercfg(n) {
+    n--;
+    const scriptNames = ['collapsedAreasAutoOpening','multiplePlacesMarking','requestFilterReset','requestFilterValueSet'];
+    affirm(scriptNames.length > n, 'scriptNames содержит меньше имен, чем параметр n');
+    if (usercfg.data[ scriptNames[n] ] === undefined) {
+      usercfg.data[ scriptNames[n] ] = {};
+    }
+    if (usercfg.data[ scriptNames[n] ].active === false) {
+      usercfg.data[ scriptNames[n] ].active = true;
+    }
+    else {
+      usercfg.data[ scriptNames[n] ].active = false;
+    }
+    usercfg.save();
   },
   prompt(options) {
 	var text = 'Введите номер пункта, который нужно выполнить:\n\n';
@@ -194,6 +221,12 @@ const menu = {
 	  if (choice === null || isValidChoice) break;
 	}
 	return +choice;
+  },
+  get_isActive_prefix(name) {
+    if (type.object(usercfg.data[name]) && usercfg.data[name].active === false) {
+      return '[<Выключен] ';
+    }
+    return '[>Включен] ';
   },
 };
 const ek5 = {};
@@ -222,7 +255,7 @@ const eok = {
       }, 500);
     });
   },
-  async markMultiplePlaces() {
+  async markMultiplePlaces() { // disactivated
     const body = await pollingSelector(document, 'body');
     addSafeObserver(body, { attributes:true, attributeOldValue:true }, async records => {
       if (records[0].oldValue !== 'overflowHidden') return;
@@ -238,11 +271,25 @@ const eok = {
       const sibling = claim(type.element, placesTitleDiv.nextElementSibling);
       affirm(sibling.innerText.includes(' из '), 'placesTitleDiv.nextElementSibling.innerText не содержит " из ".');
       const splitted = sibling.innerText.split(' из ');
-      if (splitted.pop() === '1') {
-        sibling.style.backgroundColor = '';
+      if (splitted.pop() === '1' || sibling.innerText.includes('из 1')) {
+        sibling.style.backgroundColor = 'white';
         return;
       }
       sibling.style.backgroundColor = 'orange';
+    });
+  },
+  async markMultiplePlaces2() {
+    const body = await pollingSelector(document, 'body');
+    addSafeObserver(body, { attributes:true, attributeOldValue:true }, async records => {
+      if (records[0].oldValue !== 'overflowHidden') return;
+      const placeSelect = await pollingSelector(document, '#PlaceSelect');
+      const divControl = await pollingSelector(placeSelect, 'div.control');
+      const dropdowns = await pollingSelectorAll(placeSelect, 'cdek-dropdown', 1);
+      if (dropdowns.length < 2) {
+        divControl.style.backgroundColor = 'white';
+        return;
+      }
+      divControl.style.backgroundColor = '#FFECA1';
     });
   },
 };
