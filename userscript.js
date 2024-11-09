@@ -28,7 +28,7 @@ const usercfg = {
 const cfg = {
   domainWhiteList: [
     'svvs.contact-centre.ru', 'ek5.cdek.ru', 'preorderec5.cdek.ru', 'singleadvicewindowng.cdek.ru',
-    //'messagerequestscreateformng.cdek.ru',
+    'messagerequestscreateformng.cdek.ru',
   ],
 };
 const l = console.log;
@@ -136,15 +136,18 @@ const main = {
       menu.establish();
     }
     if (domain === 'singleadvicewindowng.cdek.ru') {
-      if (usercfg.data.collapsedAreasAutoOpening && usercfg.data.collapsedAreasAutoOpening.active !== false) {
+      if (usercfg.data.collapsedAreasAutoOpening === undefined || (usercfg.data.collapsedAreasAutoOpening && usercfg.data.collapsedAreasAutoOpening.active !== false)) {
         eok.establishCollapsedAreasAutoOpening();
       }
-      if (usercfg.data.multiplePlacesMarking && usercfg.data.multiplePlacesMarking.active !== false) {
+      if (usercfg.data.multiplePlacesMarking === undefined || (usercfg.data.multiplePlacesMarking && usercfg.data.multiplePlacesMarking.active !== false)) {
         eok.markMultiplePlaces2();
+      }
+      if (usercfg.data.notificationBlockMessagerequestTabAutoOpening === undefined || (usercfg.data.notificationBlockMessagerequestTabAutoOpening && usercfg.data.notificationBlockMessagerequestTabAutoOpening.active !== false)) {
+        eok.establishNotificationBlockMessagerequestTabAutoOpening();
       }
     }
     if (domain === 'preorderec5.cdek.ru' && !location.href.includes('gate.html')) {
-      if (usercfg.data.requestFilterReset && usercfg.data.requestFilterReset.active !== false) {
+      if (usercfg.data.requestFilterReset === undefined || (usercfg.data.requestFilterReset && usercfg.data.requestFilterReset.active !== false)) {
         await preorder.resetRequestFilter();
       }
       const splittedHref = location.href.split('/');
@@ -155,7 +158,7 @@ const main = {
       }
     }
     if (domain === 'messagerequestscreateformng.cdek.ru') {
-      // await messagerequest.chooseDefaultBranch();
+      await messagerequest.chooseDefaultBranch();
     }
   },
   getDomainFromWhiteList(url) {
@@ -180,7 +183,8 @@ const menu = {
   scriptToggling() {
     const scriptChoice = menu.prompt([
       menu.get_isActive_prefix('collapsedAreasAutoOpening') + 'ЕОК: Автоматическое открытие областей об оплате и грузоместах',
-      menu.get_isActive_prefix('multiplePlacesMarking') + 'ЕОК: Окрашивание блока о готовых к выдаче местах, если в заказе более 1 места',
+      menu.get_isActive_prefix('multiplePlacesMarking') + 'ЕОК: Окрашивание селекта мест, если в заказе более 1 места',
+      menu.get_isActive_prefix('notificationBlockMessagerequestTabAutoOpening') + 'ЕОК: Автоматическое открытие вкладки сообщений-запросов',
       menu.get_isActive_prefix('requestFilterReset') + 'Журнал заявок: Автоматический сброс фильтров',
       menu.get_isActive_prefix('requestFilterValueSet') + 'Журнал заявок: Инъекция идентификатора заявки в поле фильтра',
     ]);
@@ -190,7 +194,7 @@ const menu = {
   },
   toggleScriptInUsercfg(n) {
     n--;
-    const scriptNames = ['collapsedAreasAutoOpening','multiplePlacesMarking','requestFilterReset','requestFilterValueSet'];
+    const scriptNames = ['collapsedAreasAutoOpening','multiplePlacesMarking', 'notificationBlockMessagerequestTabAutoOpening', 'requestFilterReset','requestFilterValueSet'];
     affirm(scriptNames.length > n, 'scriptNames содержит меньше имен, чем параметр n');
     if (usercfg.data[ scriptNames[n] ] === undefined) {
       usercfg.data[ scriptNames[n] ] = {};
@@ -282,14 +286,30 @@ const eok = {
     const body = await pollingSelector(document, 'body');
     addSafeObserver(body, { attributes:true, attributeOldValue:true }, async records => {
       if (records[0].oldValue !== 'overflowHidden') return;
-      const placeSelect = await pollingSelector(document, '#PlaceSelect');
-      const divControl = await pollingSelector(placeSelect, 'div.control');
-      const dropdowns = await pollingSelectorAll(placeSelect, 'cdek-dropdown', 1);
+      const placeSelect = claim(type.element, await pollingSelector(document, '#PlaceSelect'));
+      const divControl = claim(type.element, await pollingSelector(placeSelect, 'div.control'));
+      const dropdowns = claim(type.nodeList, await pollingSelectorAll(placeSelect, 'cdek-dropdown', 1));
       if (dropdowns.length < 2) {
         divControl.style.backgroundColor = 'white';
         return;
       }
       divControl.style.backgroundColor = '#FFECA1';
+    });
+  },
+  async establishNotificationBlockMessagerequestTabAutoOpening() {
+    const body = await pollingSelector(document, 'body');
+    addSafeObserver(body, { attributes:true, attributeOldValue:true }, async records => {
+      if (records[0].oldValue !== 'overflowHidden') return;
+      const notificationBlockTab = claim(type.element, await pollingSelector(document, '#notificationBlockTab'));
+      const notificationBlockTabLi = claim(type.nodeList, await pollingSelectorAll(notificationBlockTab, 'li', 4));
+      let messagerequestTabLi;
+      for (let li of notificationBlockTabLi) {
+        if (li.innerText.includes('Сообщения-запросы')) {
+          messagerequestTabLi = li;
+        }
+      }
+      affirm(type.element(messagerequestTabLi), 'Не найдена вкладка Сообщения-запросы');
+      messagerequestTabLi.dispatchEvent(new Event('click'), {bubbles:true});
     });
   },
 };
@@ -314,40 +334,45 @@ const preorder = {
   },
 };
 const messagerequest = {
+  // async establish
   async chooseDefaultBranch () {
     await messagerequest._chooseManualOfficeMode();
+    await tools.pause(1000);
     await messagerequest._chooseNovosibirsk();
   },
   async _chooseManualOfficeMode() {
     const cdekCommonControlList = claim(type.nodeList, await pollingSelectorAll(document, 'cdek-common-control') );
-
+    let cdekCommonControlOffice;
+    for (let element of cdekCommonControlList) {
+      if (element.innerText.includes('Текущий офис')) {
+        cdekCommonControlOffice = element;
+      }
+    }
+    affirm(type.element(cdekCommonControlOffice), 'Не удалось определить dropdown0');
     const cdekDropdownList0 = claim(type.nodeList, await pollingSelectorAll(document, 'cdek-dropdown', 2) );
     let dropdown0;
     for (let node of cdekDropdownList0) {
       if (node.innerHTML.includes('вручную')) {
-        dropdown0 = node
+        dropdown0 = node;
         break;
       }
     }
     affirm(type.element(dropdown0), 'Не удалось определить dropdown0');
+    cdekCommonControlOffice.dispatchEvent(new Event('click'));
+    qw(dropdown0.children)
     for (let item of dropdown0.children) {
       if (item.innerHTML.includes('вручную')) {
-        item.dispatchEvent(new Event('click'));
+        qw(item)
+        item.dispatchEvent(new Event('click'), {bubbles:true});
         break;
       }
     }
   },
   async _chooseNovosibirsk() {
     const appTopCityList = claim(type.element, await pollingSelector(document, 'app-top-city-list') );
-    const buttons = claim(type.nodeList, await pollingSelectorAll(document, 'button') );
-    let NSKbutton;
-    for (let button of buttons) {
-      if (button.innerText.includes('НСК')) {
-        NSKbutton = button;
-      }
-    }
-    affirm(type.element(NSKbutton), 'Не найдена кнопка НСК');
-    NSKbutton.dispatchEvent(new Event('click'));
+    const NSKdiv = claim(type.element, await pollingSelector(document, '#cityItemBtn_2') );
+    affirm(NSKdiv.innerText.includes('НСК'), 'Не найдена кнопка НСК');
+    NSKdiv.dispatchEvent(new Event('click'));
   },
 };
 const svvs = {
