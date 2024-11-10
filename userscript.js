@@ -1,11 +1,14 @@
 // ==UserScript==
 // @name         optimism: cdek/contact-centre
 // @namespace    http://tampermonkey.net/
-// @version      2024-11-09
-// @description  try to take over the world!
-// @author       You
-// @match        https://*/*
-
+// @version      2024-11-10
+// @description  workflow optimisation for ek5 and contact-centre
+// @author       Ton
+// @match        https://ek5.cdek.ru/*
+// @match        https://svvs.contact-centre.ru/*
+// @match        https://preorderec5.cdek.ru/*
+// @match        https://singleadvicewindowng.cdek.ru/*
+// @match        https://messagerequestscreateformng.cdek.ru/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_addValueChangeListener
@@ -61,6 +64,25 @@ const addSafeObserver = function (element, options, callback) {
 };
 const setSafeInterval = function (callback, intervalMs) {
   return setInterval(attempt.bind(null, callback, tools.defaultCatchCallback), intervalMs);
+};
+const until = function (method, intervalMs=1000) {
+  return new Promise(function (resolve, reject) {
+    if (method()) {
+        resolve();
+        return;
+    }
+    let counter = 0;
+    const intervalId = setInterval(function () {
+      if (++counter > 60) {
+        clearInterval(intervalId);
+        reject(new Error('Превышено время ожидания until.'));
+      }
+      console.log('until');
+      if (!method()) return;
+      clearInterval(intervalId);
+      resolve();
+    }, intervalMs);
+  });
 };
 const pollingSelector = function (element, selector, intervalMs=1000) {
   return new Promise(function (resolve, reject) {
@@ -158,7 +180,9 @@ const main = {
       }
     }
     if (domain === 'messagerequestscreateformng.cdek.ru') {
-      await messagerequest.chooseDefaultBranch();
+      if (usercfg.data.messagerequestDefaultBranchChoosing === undefined || (usercfg.data.messagerequestDefaultBranchChoosing && usercfg.data.messagerequestDefaultBranchChoosing.active !== false)) {
+        await messagerequest.establishDefaultBranchChoosing();
+      }
     }
   },
   getDomainFromWhiteList(url) {
@@ -187,6 +211,7 @@ const menu = {
       menu.get_isActive_prefix('notificationBlockMessagerequestTabAutoOpening') + 'ЕОК: Автоматическое открытие вкладки сообщений-запросов',
       menu.get_isActive_prefix('requestFilterReset') + 'Журнал заявок: Автоматический сброс фильтров',
       menu.get_isActive_prefix('requestFilterValueSet') + 'Журнал заявок: Инъекция идентификатора заявки в поле фильтра',
+      menu.get_isActive_prefix('messagerequestDefaultBranchChoosing') + 'Окно создания СЗ: Alt+End открывает меню выбора ветви',
     ]);
     if (scriptChoice === 0) return;
     menu.toggleScriptInUsercfg(scriptChoice);
@@ -194,7 +219,11 @@ const menu = {
   },
   toggleScriptInUsercfg(n) {
     n--;
-    const scriptNames = ['collapsedAreasAutoOpening','multiplePlacesMarking', 'notificationBlockMessagerequestTabAutoOpening', 'requestFilterReset','requestFilterValueSet'];
+    const scriptNames = [
+      'collapsedAreasAutoOpening','multiplePlacesMarking',
+      'notificationBlockMessagerequestTabAutoOpening', 'requestFilterReset',
+      'requestFilterValueSet', 'messagerequestDefaultBranchChoosing',
+    ];
     affirm(scriptNames.length > n, 'scriptNames содержит меньше имен, чем параметр n');
     if (usercfg.data[ scriptNames[n] ] === undefined) {
       usercfg.data[ scriptNames[n] ] = {};
@@ -334,45 +363,80 @@ const preorder = {
   },
 };
 const messagerequest = {
-  // async establish
-  async chooseDefaultBranch () {
-    await messagerequest._chooseManualOfficeMode();
-    await tools.pause(1000);
-    await messagerequest._chooseNovosibirsk();
+  async establishDefaultBranchChoosing() {
+    addSafeListener(document.body, 'keydown', async event => {
+      if (!event.altKey || event.key !== 'End' || event.repeat) return;
+      const choice = menu.prompt([
+        'НСК > CК > Претензии от операторов', 'НСК > CК > Заявки на изменения наклданой', 'НСК > CК > Запрос документов'
+      ]);
+      if (choice === 0) return;
+      else if (choice === 1) {
+        await messagerequest.chooseDefaultBranch(false, 'ретензии');
+      }
+      else if (choice === 2) {
+        await messagerequest.chooseDefaultBranch(false, 'изменен');
+      }
+      else if (choice === 3) {
+        await messagerequest.chooseDefaultBranch(false, 'документ');
+      }
+    });
   },
-  async _chooseManualOfficeMode() {
-    const cdekCommonControlList = claim(type.nodeList, await pollingSelectorAll(document, 'cdek-common-control') );
-    let cdekCommonControlOffice;
-    for (let element of cdekCommonControlList) {
-      if (element.innerText.includes('Текущий офис')) {
-        cdekCommonControlOffice = element;
+  async chooseDefaultBranch (nogroup, groupName) {
+    const body = claim(type.element, await pollingSelector(document, 'body') );
+    body.style.display = 'none';
+    await messagerequest._clickDropdownItem('вручную');
+    await messagerequest._chooseNovosibirsk();
+    await messagerequest._chooseOfficeAndWaitGroupLoading(nogroup, groupName);
+    body.style.display = '';
+    if (nogroup) return;
+    await messagerequest._clickDropdownItem(groupName);
+  },
+  async _chooseNovosibirsk() {
+    const NSKdiv = claim(type.element, await pollingSelector(document, '#cityItemBtn_2') );
+    affirm(NSKdiv.innerText.includes('НСК'), 'Не найдена кнопка НСК');
+    NSKdiv.dispatchEvent(new Event('click'));
+  },
+  async _chooseOfficeAndWaitGroupLoading(nogroup, groupName) {
+    const officeCtrl0 = claim(type.element, await pollingSelector(document, '#officeCtrl_0') );
+    const input = claim(type.element, await pollingSelector(officeCtrl0, 'input') );
+    input.value = 'сервис';
+    input.dispatchEvent(new Event('input', {bubbles:true}));
+    input.dispatchEvent(new Event('click', {bubbles:true}));
+    const dropdowns = claim(type.nodeList, await pollingSelectorAll(document, 'cdek-dropdown', 4) );
+    await until(() => dropdowns[0].parentElement.innerText.includes('ервисна'));
+    let officeDropdown;
+    for (let dropdown of dropdowns) {
+      if (dropdown.innerText.includes('ервисна')) {
+        officeDropdown = dropdown;
       }
     }
-    affirm(type.element(cdekCommonControlOffice), 'Не удалось определить dropdown0');
-    const cdekDropdownList0 = claim(type.nodeList, await pollingSelectorAll(document, 'cdek-dropdown', 2) );
-    let dropdown0;
-    for (let node of cdekDropdownList0) {
-      if (node.innerHTML.includes('вручную')) {
-        dropdown0 = node;
+    affirm(type.element(officeDropdown), 'Не найден officeDropdown');
+    affirm(officeDropdown.children.length === 1, 'Не типичное количество потомков officeDropdown');
+    officeDropdown.children[0].dispatchEvent(new Event('click'));
+    const groupCtrl0 = claim(type.element, await pollingSelector(document, '#groupCtrl_0') );
+    const cdekCommonContolGroup = claim(type.element, await pollingSelector(groupCtrl0, 'cdek-common-control') );
+    await until(() => {
+      cdekCommonContolGroup.dispatchEvent(new Event('click'));
+      return dropdowns[0].parentElement.innerText.includes(groupName)
+    });
+    input.blur();
+  },
+  async _clickDropdownItem(name) {
+    const cdekDropdownList = claim(type.nodeList, await pollingSelectorAll(document, 'cdek-dropdown', 2) );
+    let dropdown;
+    for (let node of cdekDropdownList) {
+      if (node.innerHTML.includes(name)) {
+        dropdown = node;
         break;
       }
     }
-    affirm(type.element(dropdown0), 'Не удалось определить dropdown0');
-    cdekCommonControlOffice.dispatchEvent(new Event('click'));
-    qw(dropdown0.children)
-    for (let item of dropdown0.children) {
-      if (item.innerHTML.includes('вручную')) {
-        qw(item)
+    affirm(type.element(dropdown), 'Не удалось определить dropdown для ' + name);
+    for (let item of dropdown.children) {
+      if (item.innerHTML.includes(name)) {
         item.dispatchEvent(new Event('click'), {bubbles:true});
         break;
       }
     }
-  },
-  async _chooseNovosibirsk() {
-    const appTopCityList = claim(type.element, await pollingSelector(document, 'app-top-city-list') );
-    const NSKdiv = claim(type.element, await pollingSelector(document, '#cityItemBtn_2') );
-    affirm(NSKdiv.innerText.includes('НСК'), 'Не найдена кнопка НСК');
-    NSKdiv.dispatchEvent(new Event('click'));
   },
 };
 const svvs = {
