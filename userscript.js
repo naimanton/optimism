@@ -317,8 +317,8 @@ const eok = {
       if (records[0].oldValue !== 'overflowHidden') return;
       const placeSelect = claim(type.element, await pollingSelector(document, '#PlaceSelect'));
       const divControl = claim(type.element, await pollingSelector(placeSelect, 'div.control'));
-      const dropdowns = claim(type.nodeList, await pollingSelectorAll(placeSelect, 'cdek-dropdown', 1));
-      if (dropdowns.length < 2) {
+      const dropdownItems = claim(type.nodeList, await pollingSelectorAll(placeSelect, 'cdek-dropdown-item', 1));
+      if (dropdownItems.length < 2) {
         divControl.style.backgroundColor = 'white';
         return;
       }
