@@ -57,7 +57,7 @@ const addSafeListener = function (element, eventType, callback) {
 };
 const addSafeObserver = function (element, options, callback) {
   const mo = new MutationObserver( (records, mo) => {
-    attempt(null, () => callback(records, mo), tools.defaultCatchCallback);
+    attempt(() => callback(records, mo), tools.defaultCatchCallback);
   });
   mo.observe(element, options);
   return mo;
