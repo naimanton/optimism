@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         optimism: cdek/contact-centre
 // @namespace    http://tampermonkey.net/
-// @version      2024-12-8
+// @version      2024-12-07
 // @description  workflow optimisation for ek5 and contact-centre
 // @author       Ton
 // @match        https://ek5.cdek.ru/*
@@ -13,8 +13,7 @@
 // @match        https://messagerequestscreateformng.cdek.ru/*
 // @match        https://companystructurefrontng.cdek.ru/*
 // @match        https://coworker.cdek.ru/*
-// require      https://unpkg.com/@popperjs/core@2
-// require      https://unpkg.com/tippy.js@6
+// @match        https://orderec5ng.cdek.ru/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_listValues
@@ -42,7 +41,7 @@ const usercfg = {
 const cfg = {
     domainWhiteList: [
         'svvs.contact-centre.ru', 'ek5.cdek.ru', 'preorderec5.cdek.ru', 'singleadvicewindowng.cdek.ru', /*'smartadvicewindowng.cdek.ru',*/
-        'messagerequestscreateformng.cdek.ru', 'companystructurefrontng.cdek.ru', 'coworker.cdek.ru', 'calltaskfrontng.cdek.ru'
+        'messagerequestscreateformng.cdek.ru', 'companystructurefrontng.cdek.ru', 'coworker.cdek.ru', 'calltaskfrontng.cdek.ru', 'orderec5ng.cdek.ru'
     ],
     color: {
         softYellow: '#fff8e1',
@@ -151,7 +150,9 @@ const type = {
     element: item => item instanceof Element,
     nodeList: item => type.of(item) === '[object nodelist]',
     htmlCollection: item => type.of(item) === '[object htmlcollection]',
+    tableSectionElement: item => type.of(item) === '[object htmltablesectionelement]',
     object: item => type.of(item) === '[object object]',
+    string: item => type.of(item) === '[object string]',
     notEmptyString: item => type.of(item) === '[object string]' && item.length > 0,
 };
 const tools = {
@@ -203,15 +204,25 @@ const tools = {
     showMessage(message) {
         tools._showNotification(message, '#BFD641');
     },
+    getNumberOfCost(costString) {
+        const dotified = costString.replace(',', '.');
+        let result = '', valid = '0123456789.';
+        for (var sym of dotified) {
+           if (valid.includes(sym)) result += sym;
+        }
+        return +result;
+    }
 };
 const main = {
     async run() {
         const domain = main.getDomainFromWhiteList(location.href);
         if (domain === false) return;
-        main.injectTooltipCSS();
-        main.injectCtxmenuCSS();
+        tooltip.injectCSS();
+        ctxmenu.injectCSS();
+        //menu0.injectCSS();
         main.injectNotificationCSS();
         await main.injectNotificationDiv();
+
         usercfg.loadFromStorage();
         await main.manageScripts(domain);
     },
@@ -225,53 +236,6 @@ const main = {
             //}
             optimismNotificationContainer.innerHTML = '';
         });
-    },
-    injectCtxmenuCSS() {
-        GM_addStyle(`
-        .optimism-context-menu {
-            position: absolute;
-            background-color: #fff;
-            border: 1px solid #ccc;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            list-style: none;
-            padding: 5px 0;
-            margin: 0;
-            display: none;
-            z-index: 1000;
-        }
-
-        .optimism-context-menu li {
-            padding: 8px 16px;
-            cursor: pointer;
-        }
-
-        .optimism-context-menu li:hover {
-            background-color: #f0f0f0;
-        }
-        `);
-    },
-    injectTooltipCSS() {
-        GM_addStyle(`
-      .optimism-tooltip {
-            position: absolute;
-            background-color: #333;
-            color: #fff;
-            padding: 8px 12px;
-            border-radius: 4px;
-            font-size: 14px;
-            white-space: nowrap;
-            z-index: 1000;
-            pointer-events: none;
-            opacity: 0;
-            transition: opacity 0.2s;
-        }
-        .optimism-tooltip-arrow {
-            position: absolute;
-            width: 0;
-            height: 0;
-            border-style: solid;
-        }
-    `);
     },
     injectNotificationCSS() {
         GM_addStyle(`
@@ -337,11 +301,19 @@ const main = {
             await tools.runScriptIfActiveInUsercfg('ДЗНП (автоматическое закрытие раздела после нажатия Сохранить)', 'calltaskSaveButtonTabAutoClosing', calltask.establishSaveButtonTabAutoClosing.bind(calltask));
         } else if (domain === 'messagerequestscreateformng.cdek.ru') {
             await tools.runScriptIfActiveInUsercfg('Форма создания СЗ (автовыбор ветви)', 'messagerequestDefaultBranchChoosing', messagerequest.establishDefaultBranchChoosing.bind(messagerequest));
-            //await tools.runScriptIfActiveInUsercfg('Форма создания СЗ (закрытие активной вкладки кнопками Отправить/Закрыть)', 'messagerequestCreateFormCompleteButtonsTabAutoClosing', messagerequest.establishCreateFormCompleteButtonsTabAutoClosing.bind(messagerequest));
+            // await tools.runScriptIfActiveInUsercfg('Форма создания СЗ (закрытие активной вкладки кнопками Отправить/Закрыть)', 'messagerequestCreateFormCompleteButtonsTabAutoClosing', messagerequest.establishCreateFormCompleteButtonsTabAutoClosing.bind(messagerequest));
         } else if (domain === 'companystructurefrontng.cdek.ru') {
             await tools.runScriptIfActiveInUsercfg('Офисы (Enter в поле кода офиса нажимает Найти и очищает фильтр)', 'companystructureEnterKeyExtraListener', companystructure.establishEnterKeyExtraListener.bind(companystructure));
         } else if (domain === 'coworker.cdek.ru') {
-            await tools.runScriptIfActiveInUsercfg('Сотрудник (Enter в поле кода офиса выбирает 1-ый офис, нажимает Найти и очищает фильтр)', 'coworkerEnterKeyExtraListener', coworker.establishEnterKeyExtraListener.bind(companystructure));
+            await tools.runScriptIfActiveInUsercfg('Сотрудник (Enter в поле кода офиса выбирает 1-ый офис, нажимает Найти и очищает фильтр)', 'coworkerEnterKeyExtraListener', coworker.establishEnterKeyExtraListener.bind(coworker));
+        } else if (domain === 'orderec5ng.cdek.ru') {
+            if (location.href.includes('ourna')) {
+            }
+            else {
+                await tools.runScriptIfActiveInUsercfg('Создание/редактирование заказа (предупреждение: обрешетка увеличивает срок доставки на 1 день)', 'orderec5LathingExtraDeliveryDayNotification', orderec5.establishLathingExtraDeliveryDayNotification.bind(orderec5));
+                await tools.runScriptIfActiveInUsercfg('Создание/редактирование заказа: авиапризнаки запоминаются в подсказки', 'orderec5TransportSchemeMemorization', orderec5.establishTransportSchemeMemorization.bind(orderec5));
+                await tools.runScriptIfActiveInUsercfg('Создание/редактирование заказа: разность сумм при внесении изменений', 'orderec5SumDifferenceCalculation', orderec5.establishSumDifferenceCalculation.bind(orderec5));
+            }
         }
     },
     getDomainFromWhiteList(url) {
@@ -406,6 +378,9 @@ const menu = {
             menu.get_isActive_prefix('companystructureEnterKeyExtraListener') + 'Офисы: Enter в фильтре по коду офиса производит поиск и очищает фильтр',
             menu.get_isActive_prefix('coworkerEnterKeyExtraListener') + 'Сотрудник: Enter в фильтре по коду офиса выбирает 1-ый офис, производит поиск и очищает фильтр',
             menu.get_isActive_prefix('calltaskSaveButtonTabAutoClosing') + 'ДЗНП: автоматическое закрытие раздела после нажатия Сохранить',
+            menu.get_isActive_prefix('orderec5LathingExtraDeliveryDayNotification') + 'Создание/редактирование заказа: предупреждение: обрешетка увеличивает срок доставки на 1 день',
+            menu.get_isActive_prefix('orderec5TransportSchemeMemorization') + 'Создание/редактирование заказа: авиапризнаки запоминаются в подсказки',
+            menu.get_isActive_prefix('orderec5SumDifferenceCalculation') + 'Создание/редактирование заказа: разность сумм при внесении изменений',
         ]);
         if (scriptChoice === 0) return;
         menu.toggleScriptInUsercfg(scriptChoice);
@@ -417,7 +392,8 @@ const menu = {
             'EKtabClosingEventListener', 'collapsedAreasAutoOpening', 'multiplePlacesMarking',
             'notificationBlockMessagerequestTabAutoOpening', 'eokContextMenuOnLinks', 'requestFilterReset',
             'requestFilterValueSet', 'messagerequestDefaultBranchChoosing', 'messagerequestCreateFormCompleteButtonsTabAutoClosing',
-            'companystructureEnterKeyExtraListener', 'coworkerEnterKeyExtraListener', 'calltaskSaveButtonTabAutoClosing'
+            'companystructureEnterKeyExtraListener', 'coworkerEnterKeyExtraListener', 'calltaskSaveButtonTabAutoClosing',
+            'orderec5LathingExtraDeliveryDayNotification', 'orderec5TransportSchemeMemorization', 'orderec5SumDifferenceCalculation',
         ];
         affirm(scriptNames.length > n, 'scriptNames содержит меньше имен, чем параметр n');
         if (usercfg.data[scriptNames[n]] === undefined) {
@@ -437,6 +413,7 @@ const menu = {
             text += '- ' + n + ') ' + option + ';\n';
             n++;
         }
+        console.log(text)
         var choice;
         for (;;) {
             choice = prompt(text);
@@ -457,14 +434,23 @@ const menu = {
     },
 };
 const tooltip = {
-    establish(element, text, preferredPosition = 'top') {
+    establish(element, textOrMethod, preferredPosition = 'top') {
+        let method;
+        if (type.string(textOrMethod)) method = () => textOrMethod;
+        else method = textOrMethod;
         const tip = new tooltip.Tooltip();
-        addSafeListener(element, 'mouseenter', 'Всплывающая подсказка (showTooltip)', () => {
-            tip.showTooltip(element, text, preferredPosition);
+        tip.listeners = {};
+        tip.listeners.enter = addSafeListener(element, 'mouseenter', 'Всплывающая подсказка (showTooltip)', () => {
+            tip.showTooltip(element, method(), preferredPosition);
         });
-        addSafeListener(element, 'mouseenter', 'Всплывающая подсказка (hideTooltip)', () => {
+        tip.listeners.leave = addSafeListener(element, 'mouseleave', 'Всплывающая подсказка (hideTooltip)', () => {
             tip.hideTooltip();
         });
+        return tip;
+    },
+    unlisten(tip) {
+        removeEventListener(tip.listeners.enter);
+        removeEventListener(tip.listeners.leave);
     },
     Tooltip: class Tooltip {
         constructor() {
@@ -597,6 +583,29 @@ const tooltip = {
             }
         }
     },
+    injectCSS() {
+        GM_addStyle(`
+      .optimism-tooltip {
+            position: absolute;
+            background-color: #333;
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            white-space: nowrap;
+            z-index: 1000;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .optimism-tooltip-arrow {
+            position: absolute;
+            width: 0;
+            height: 0;
+            border-style: solid;
+        }
+       `);
+    },
 };
 const ctxmenu = {
     ContextMenu: class {
@@ -637,12 +646,198 @@ const ctxmenu = {
         attachMenu(selector) {
             addSafeListener(document, 'click', 'Скрытие контекстного меню', () => this.hideMenu());
             addSafeListener(document, 'contextmenu', 'Открытие контекстного меню', event => {
+                if (event.ctrlKey && !event.repeat) return; // Ctrl+RMB открывает стандартное контекстное меню (на случае если в ЭК5 введут тоже меню)
                 // Проверяем, вызвано ли меню на нужном элементе
                 if (event.target.closest(selector)) this.showMenu(event);
                 else this.hideMenu();
             });
         }
-    }
+    },
+    injectCSS() {
+        GM_addStyle(`
+        .optimism-context-menu {
+            position: absolute;
+            background-color: #fff;
+            border: 1px solid #ccc;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            list-style: none;
+            padding: 5px 0;
+            margin: 0;
+            display: none;
+            z-index: 1000;
+        }
+
+        .optimism-context-menu li {
+            padding: 8px 16px;
+            cursor: pointer;
+        }
+
+        .optimism-context-menu li:hover {
+            background-color: #f0f0f0;
+        }
+        `);
+    },
+};
+const menu0 = {
+    openPrompt() {
+
+    },
+    PromptMenu: class {
+        constructor() {
+            this.overlay = null;
+            this.menu = null;
+        }
+
+        open(content, placeholder, onSubmit, onCancel) {
+            // Create overlay
+            this.overlay = document.createElement('div');
+            this.overlay.className = 'optimism-prompt-menu-overlay';
+            this.overlay.addEventListener('click', () => this.close());
+
+            // Create menu container
+            this.menu = document.createElement('div');
+            this.menu.className = 'optimism-prompt-menu';
+
+            // Header
+            const header = document.createElement('div');
+            header.className = 'optimism-prompt-menu-header';
+            header.textContent = 'Prompt Menu';
+
+            // Body (HTML Content)
+            const body = document.createElement('div');
+            body.className = 'optimism-prompt-menu-body';
+            body.innerHTML = content;
+
+            // Input section
+            const inputSection = document.createElement('div');
+            inputSection.className = 'optimism-prompt-menu-input';
+
+            const inputField = document.createElement('input');
+            inputField.type = 'text';
+            inputField.placeholder = placeholder;
+            inputField.addEventListener('keydown', event => {
+                if (event.key !== 'Enter' || event.repeat) return;
+                onSubmit(inputField.value);
+                this.close();
+            });
+            const buttons = document.createElement('div');
+            buttons.className = 'optimism-prompt-menu-buttons';
+
+            const submitButton = document.createElement('button');
+            submitButton.className = 'optimism-btn-submit';
+            submitButton.textContent = 'Submit';
+            submitButton.addEventListener('click', () => {
+                onSubmit(inputField.value);
+                this.close();
+            });
+
+            const cancelButton = document.createElement('button');
+            cancelButton.className = 'optimism-btn-cancel';
+            cancelButton.textContent = 'Cancel';
+            cancelButton.addEventListener('click', () => {
+                if (onCancel) onCancel();
+                this.close();
+            });
+
+            buttons.appendChild(submitButton);
+            buttons.appendChild(cancelButton);
+
+            inputSection.appendChild(inputField);
+            inputSection.appendChild(buttons);
+
+            // Combine all parts
+            this.menu.appendChild(header);
+            this.menu.appendChild(body);
+            this.menu.appendChild(inputSection);
+
+            // Add to document
+            document.body.appendChild(this.overlay);
+            document.body.appendChild(this.menu);
+            inputField.focus();
+        }
+
+        close() {
+            if (this.overlay) {
+                document.body.removeChild(this.overlay);
+                this.overlay = null;
+            }
+            if (this.menu) {
+                document.body.removeChild(this.menu);
+                this.menu = null;
+            }
+        }
+    },
+    injectCSS() {
+        GM_addStyle(`
+        .optimism-prompt-menu {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #fff;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            width: 400px;
+            max-width: 90%;
+            z-index: 1000;
+            overflow: hidden;
+        }
+        .optimism-prompt-menu-header {
+            padding: 16px;
+            font-size: 18px;
+            font-weight: bold;
+            background-color: #f5f5f5;
+            border-bottom: 1px solid #ddd;
+        }
+        .optimism-prompt-menu-body {
+            padding: 16px;
+            font-size: 14px;
+        }
+        .optimism-prompt-menu-input {
+            display: flex;
+            flex-direction: column;
+            padding: 16px;
+            border-top: 1px solid #ddd;
+            background-color: #f9f9f9;
+        }
+        .optimism-prompt-menu-input input {
+            font-size: 14px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .optimism-prompt-menu-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .optimism-prompt-menu-buttons button {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .optimism-prompt-menu-buttons .btn-submit {
+            background-color: #007bff;
+            color: white;
+        }
+        .optimism-prompt-menu-buttons .btn-cancel {
+            background-color: #ccc;
+            color: black;
+        }
+        .optimism-prompt-menu-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+        }
+        `);
+    },
 };
 const ek5 = {
     async establishEKtabClosingEventListener() {
@@ -660,7 +855,8 @@ const ek5 = {
                 }
             }, tools.defaultCatchCallback.bind(tools, 'ЭК5 (закрытие вкладок)'));
         });
-    }
+    },
+
 };
 const eok = {
     async establishCollapsedAreasAutoOpening() {
@@ -820,6 +1016,7 @@ const preorder = {
         // requestFilterInput.dispatchEvent(new Event('keydown', {key: 'Enter'}));
         //findButton.dispatchEvent(new Event('click'));
     },
+
 };
 const messagerequest = {
     /* Create form */
@@ -993,6 +1190,54 @@ const calltask = {
                 });
             });
         });
+    },
+};
+const orderec5 = {
+    async establishLathingExtraDeliveryDayNotification() {
+        const placesDiv = claim(type.element, await pollingSelector(document, '#places'));
+        const observer = addSafeObserver(placesDiv, {
+            childList: true, subtree: true,
+        }, 'Создание/редактирование заказа (предупреждение: обрешетка увеличивает срок доставки на 1 день)', async (records, observer) => {
+            if (placesDiv.innerText.includes('ВГХ с обрешёткой')) {
+                observer.disconnect();
+                tools.showMessage('Изготовление обрешётки увеличивает срок доставки на 1 рабочий день.');
+            }
+        });
+    },
+    async establishTransportSchemeMemorization() {
+        const pattern = 'Авиа в ТС: ';
+        const tariffsDiv = claim(type.element, await pollingSelector(document, '#tariffs'));
+        const observer = addSafeObserver(tariffsDiv, {
+            childList: true, subtree: true,
+        }, 'Создание/редактирование заказа (признаки ТС (земля/авиа) запоминаются в подсказки)', async (records, observer) => {
+            if ( !type.tableSectionElement(records[0].addedNodes[0]) ) return;
+            const rows = claim(type.nodeList, await pollingSelectorAll(tariffsDiv, 'tr.ng-star-inserted', 1));
+            for (let row of rows) {
+                const i = claim(type.element, await pollingSelector(row, 'i'));
+                const tsCell = i.parentElement;
+                if (i.className.includes('flight')) tsCell.title = pattern + 'да+';
+                else if (i.className.includes('car')) tsCell.title = pattern + 'нет-';
+            }
+        });
+    },
+    async establishSumDifferenceCalculation() {
+        const appSummary = claim(type.element, await pollingSelector(document, 'app-summary'));
+        addSafeObserver(appSummary, {
+            childList: true, subtree: true,
+        }, 'Создание/редактирование заказа (разность сумм при внесении изменений)', async () => {
+            const appTotalCostResult = claim(type.element, await pollingSelector(document, 'app-total-cost-result'));
+            const spanPrevious = appTotalCostResult.querySelector('span.previous');
+            if (!type.element(spanPrevious)) return;
+            const spanHeadline = claim(type.element, await pollingSelector(appTotalCostResult, 'span.headline-value'));
+            const previousNumber = tools.getNumberOfCost(spanPrevious.innerText);
+            const headlineNumber = tools.getNumberOfCost(spanHeadline.innerText);
+            let difference = headlineNumber - previousNumber + "";
+            if (difference[0] !== '-') difference = '+' + difference;
+            spanPrevious.title = headlineNumber + ' - ' + previousNumber + ' = ' + difference;
+        });
+    },
+    async establishLAUOnotification() { // LAUO - Loading and unloading operations (ПРР)
+
     },
 };
 const gateway = {
