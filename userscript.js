@@ -312,7 +312,7 @@ const main = {
         } else if (domain === 'coworker.cdek.ru') {
             await tools.runScriptIfActiveInUsercfg('Сотрудник (Enter в поле кода офиса выбирает 1-ый офис, нажимает Найти и очищает фильтр)', 'coworkerEnterKeyExtraListener', coworker.establishEnterKeyExtraListener.bind(coworker));
         } else if (domain === 'orderec5ng.cdek.ru') {
-            if (location.href.includes('create')) {
+            if (location.href.includes('create') || location.href.includes('open')) {
                 await tools.runScriptIfActiveInUsercfg('Создание/редактирование заказа (предупреждение: обрешетка увеличивает срок доставки на 1 день)', 'orderec5LathingExtraDeliveryDayNotification', orderec5.establishLathingExtraDeliveryDayNotification.bind(orderec5));
                 await tools.runScriptIfActiveInUsercfg('Создание/редактирование заказа: авиапризнаки запоминаются в подсказки', 'orderec5TransportSchemeMemorization', orderec5.establishTransportSchemeMemorization.bind(orderec5));
                 await tools.runScriptIfActiveInUsercfg('Создание/редактирование заказа: разность сумм при внесении изменений', 'orderec5SumDifferenceCalculation', orderec5.establishSumDifferenceCalculation.bind(orderec5));
