@@ -1,15 +1,16 @@
 // ==UserScript==
 // @name         optimism: cdek/contact-centre
 // @namespace    http://tampermonkey.net/
-// @version      2024-12-15
+// @version      25.01.04
 // @description  workflow optimisation for ek5 and contact-centre
 // @author       Ton
+// @run-at       document-start
 // @match        https://ek5.cdek.ru/*
 // match        https://svvs.contact-centre.ru/*
 // @match        https://preorderec5.cdek.ru/*
 // @match        https://calltaskfrontng.cdek.ru/*
 // @match        https://singleadvicewindowng.cdek.ru/*
-// match        https://smartadvicewindowng.cdek.ru/*
+// @match        https://smartadvicewindowng.cdek.ru/*
 // @match        https://messagerequestscreateformng.cdek.ru/*
 // @match        https://companystructurefrontng.cdek.ru/*
 // @match        https://coworker.cdek.ru/*
@@ -22,8 +23,44 @@
 // @grant        GM_removeValueChangeListener
 // @grant        GM_setClipboard
 // @grant        GM_addStyle
+// @grant        unsafeWindow
 // ==/UserScript==
+const context = {
+    domain: null, 
+};
+const storage = {
+    getValue(name) {
+        return GM_getValue(name);
+    },
+    setValue(name, value) {
+        GM_setValue(name, value);
+    },
+    getValueJSON(name) {
+        const value = GM_getValue(name);
+        return JSON.parse(value);
+    },
+    setValueJSON(name, object) {
+        GM_setValue(name, JSON.stringify(object));
+    },
+    editObject(name, callback) {
+        const object = storage.getValueJSON(name);
+        callback(object);
+        storage.setValueJSON(name, object);
+    },
+    defineValueJSON(name, onlyIfUndefined, object) {
+        if (!onlyIfUndefined || storage.getValue(name) === undefined) {
+            storage.setValueJSON(name, object);
+        }
+    },
+    mount(onlyIfUndefined=true) {
+        storage.defineValueJSON('usercfg', onlyIfUndefined, {
 
+        });
+        storage.defineValueJSON('singleadvicewindow', onlyIfUndefined, {
+
+        });
+    },
+};
 const usercfg = {
     data: null,
     loadFromStorage() {
@@ -40,8 +77,12 @@ const usercfg = {
 };
 const cfg = {
     domainWhiteList: [
-        'svvs.contact-centre.ru', 'ek5.cdek.ru', 'preorderec5.cdek.ru', 'singleadvicewindowng.cdek.ru', /*'smartadvicewindowng.cdek.ru',*/
+        'svvs.contact-centre.ru', 'ek5.cdek.ru', 'preorderec5.cdek.ru', 'singleadvicewindowng.cdek.ru', 'smartadvicewindowng.cdek.ru',
         'messagerequestscreateformng.cdek.ru', 'companystructurefrontng.cdek.ru', 'coworker.cdek.ru', 'calltaskfrontng.cdek.ru', 'orderec5ng.cdek.ru'
+    ],
+    xhrInterceptingDomainWhiteList: [
+        'singleadvicewindowng.cdek.ru', 'smartadvicewindowng.cdek.ru', 
+        'messagerequestscreateformng.cdek.ru', 'calltaskfrontng.cdek.ru',
     ],
     color: {
         softYellow: '#fff8e1',
@@ -55,101 +96,107 @@ const cfg = {
         },
     },
 };
-const l = console.log;
-const qw = l;
-const affirm = function(boolean, message) {
-    if (boolean) return;
-    throw new Error(message);
-};
-const claim = function(assertionMethod, item) {
-    affirm(assertionMethod(item), 'Type error in claim()');
-    return item;
-};
-const attempt = async function(tryCallback, catchCallback) {
-    try {
-        await tryCallback();
-    } catch (error) {
-        await catchCallback(error);
-    }
-};
-const addSafeListener = function(element, eventType, title, callback) {
-    return element.addEventListener(
-        eventType, event => {
-            attempt(() => callback(event), tools.defaultCatchCallback.bind(tools, title));
+const control = {
+    l: console.log,
+    qw: console.log,
+    affirm(boolean, message) {
+        if (boolean) return;
+        throw new Error(message);
+    },
+    claim(assertionMethod, item) {
+        affirm(assertionMethod(item), 'Type error in claim()');
+        return item;
+    },
+    async attempt(tryCallback, catchCallback) {
+        try {
+            await tryCallback();
+        } catch (error) {
+            await catchCallback(error);
         }
-    );
-};
-const addSafeObserver = function(element, options, title, callback) {
-    const mo = new MutationObserver((records, mo) => {
-        attempt(() => callback(records, mo), tools.defaultCatchCallback.bind(tools, title));
-    });
-    mo.observe(element, options);
-    return mo;
-};
-const setSafeInterval = function(title, callback, intervalMs) {
-    return setInterval(attempt.bind(null, callback, tools.defaultCatchCallback.bind(tools, title)), intervalMs);
-};
-const until = function(method, intervalMs = 1000) {
-    return new Promise(function(resolve, reject) {
-        if (method()) {
-            resolve();
-            return;
-        }
-        let counter = 0;
-        const intervalId = setInterval(function() {
-            if (++counter > 60) {
-                clearInterval(intervalId);
-                reject(new Error('Превышено время ожидания until.'));
+    },
+    addSafeListener(element, eventType, title, callback) {
+        return element.addEventListener(
+            eventType, event => {
+                attempt(() => callback(event), tools.defaultCatchCallback.bind(tools, title));
             }
-            console.log('until');
-            if (!method()) return;
-            clearInterval(intervalId);
-            resolve();
-        }, intervalMs);
-    });
-};
-const pollingSelector = function(element, selector, intervalMs = 1000) {
-    return new Promise(function(resolve, reject) {
-        const resultElement = element.querySelector(selector);
-        if (resultElement !== null) {
-            resolve(resultElement);
-            return;
-        }
-        let counter = 0;
-        const intervalId = setInterval(function() {
-            if (++counter > 60) {
-                clearInterval(intervalId);
-                reject(new Error('Превышено время ожидания pollingSelector: ' + selector));
+        );
+    },
+    addSafeObserver(element, options, title, callback) {
+        const mo = new MutationObserver((records, mo) => {
+            attempt(() => callback(records, mo), tools.defaultCatchCallback.bind(tools, title));
+        });
+        mo.observe(element, options);
+        return mo;
+    },
+    setSafeInterval(title, callback, intervalMs) {
+        return setInterval(attempt.bind(null, callback, tools.defaultCatchCallback.bind(tools, title)), intervalMs);
+    },
+    until(method, intervalMs = 1000) {
+        return new Promise(function(resolve, reject) {
+            if (method()) {
+                resolve();
+                return;
             }
-            console.log('optimism polling selector: ', selector)
+            let counter = 0;
+            const intervalId = setInterval(function() {
+                if (++counter > 60) {
+                    clearInterval(intervalId);
+                    reject(new Error('Превышено время ожидания until.'));
+                }
+                console.log('until');
+                if (!method()) return;
+                clearInterval(intervalId);
+                resolve();
+            }, intervalMs);
+        });
+    },
+    pollingSelector(element, selector, intervalMs = 1000) {
+        return new Promise(function(resolve, reject) {
             const resultElement = element.querySelector(selector);
-            if (resultElement === null) return;
-            clearInterval(intervalId);
-            resolve(resultElement);
-        }, intervalMs);
-    });
-};
-const pollingSelectorAll = function(element, selector, len = 1, intervalMs = 1000) {
-    return new Promise(function(resolve, reject) {
-        const resultCollection = element.querySelectorAll(selector);
-        if (resultCollection.length >= len) {
-            resolve(resultCollection);
-            return;
-        }
-        let counter = 0;
-        const intervalId = setInterval(function() {
-            if (++counter > 60) {
-                clearInterval(intervalId);
-                reject(new Error('Превышено время ожидания pollingSelectorAll: ' + selector));
+            if (resultElement !== null) {
+                resolve(resultElement);
+                return;
             }
-            console.log('optimism polling selector all: ', selector)
+            let counter = 0;
+            const intervalId = setInterval(function() {
+                if (++counter > 60) {
+                    clearInterval(intervalId);
+                    reject(new Error('Превышено время ожидания pollingSelector: ' + selector));
+                }
+                console.log('optimism polling selector: ', selector)
+                const resultElement = element.querySelector(selector);
+                if (resultElement === null) return;
+                clearInterval(intervalId);
+                resolve(resultElement);
+            }, intervalMs);
+        });
+    },
+    pollingSelectorAll(element, selector, len = 1, intervalMs = 1000) {
+        return new Promise(function(resolve, reject) {
             const resultCollection = element.querySelectorAll(selector);
-            if (resultCollection.length < len) return;
-            clearInterval(intervalId);
-            resolve(resultCollection);
-        }, intervalMs);
-    });
+            if (resultCollection.length >= len) {
+                resolve(resultCollection);
+                return;
+            }
+            let counter = 0;
+            const intervalId = setInterval(function() {
+                if (++counter > 60) {
+                    clearInterval(intervalId);
+                    reject(new Error('Превышено время ожидания pollingSelectorAll: ' + selector));
+                }
+                console.log('optimism polling selector all: ', selector)
+                const resultCollection = element.querySelectorAll(selector);
+                if (resultCollection.length < len) return;
+                clearInterval(intervalId);
+                resolve(resultCollection);
+            }, intervalMs);
+        });
+    },
 };
+const {
+    l, qw, affirm, claim, attempt, addSafeListener, addSafeObserver, 
+    setSafeInterval, until, pollingSelector, pollingSelectorAll,
+} = control;
 const type = {
     of: item => Object.prototype.toString.call(item).toLowerCase(),
     element: item => item instanceof Element,
@@ -216,20 +263,51 @@ const tools = {
            if (valid.includes(sym)) result += sym;
         }
         return +result;
-    }
+    },
+    getOfficeCodeSubstr(string) {
+        const m = string.match(/[A-Z]+\d+/);
+        if (m === null) return false;
+        return m[0];
+    },
+};
+const xhr = {
+    _XMLHttpRequest: unsafeWindow.XMLHttpRequest,
+    Interceptor: class {
+        constructor(...args) {
+            const instance = new xhr._XMLHttpRequest(...args);
+            addSafeListener(
+                instance, 'loadend', 'XMLHttpRequest (событие loadend)', 
+                xhr.loadendEvent.bind(xhr, instance)
+            );
+            return instance; 
+        }
+    },
+    loadendEvent(instance) {
+        if (instance.responseURL.includes('get-order-clients')) {
+            qw(instance)
+        }
+        // if (1||instance.__sentry_xhr__.body.includes('get-order-clients')) {
+        if (0&&instance.responseURL.includes('clients')) {
+            qw(JSON.parse(instance.responseText));
+        }
+            // qw(location.origin, instance.responseURL);
+    },
 };
 const main = {
     async run() {
-        const domain = main.getDomainFromWhiteList(location.href);
-        if (domain === false) return;
+        context.domain = main.getDomainFromWhiteList(location.href, 'domainWhiteList');
+        if (context.domain === false) return;
+        const isXHRinterceptingDomain = cfg.xhrInterceptingDomainWhiteList.includes(context.domain);
+        // подмена класса XHR на перехватчик
+        if (isXHRinterceptingDomain) unsafeWindow.XMLHttpRequest = xhr.Interceptor;
         tooltip.injectCSS();
         ctxmenu.injectCSS();
         //menu0.injectCSS();
         main.injectNotificationCSS();
         await main.injectNotificationDiv();
-
+        storage.mount(true);
         usercfg.loadFromStorage();
-        await main.manageScripts(domain);
+        await main.manageScripts(context.domain);
     },
     async injectNotificationDiv() {
         const body = claim(type.element, await pollingSelector(document, 'body'));
@@ -277,11 +355,11 @@ const main = {
             // svvs.establishAutoupdate();
         } else if (domain === 'ek5.cdek.ru') {
             GM_setValue('closeEKtab', null);
-            main.setLocalStorageAuthTokenToGMstorage();
+            // main.setLocalStorageAuthTokenToGMstorage();
             await menu.establish();
             await tools.runScriptIfActiveInUsercfg('ЭК5 (закрытие вкладок)', 'EKtabClosingEventListener', ek5.establishEKtabClosingEventListener.bind(ek5));
         } else if (domain === 'smartadvicewindowng.cdek.ru') {
-
+            //gateway.getOrderClients('10069715766').then(l);
         } else if (domain === 'singleadvicewindowng.cdek.ru') {
             if (!location.href.includes('smartAdviceWindow')) { // старый ЕОК
                 await until(() => type.element(document.body));
@@ -319,8 +397,8 @@ const main = {
             }
         }
     },
-    getDomainFromWhiteList(url) {
-        for (let domain of cfg.domainWhiteList) {
+    getDomainFromWhiteList(url, listName) {
+        for (let domain of cfg[listName]) {
             if (url.includes(domain)) return domain;
         }
         return false;
@@ -859,7 +937,6 @@ const ek5 = {
             }, tools.defaultCatchCallback.bind(tools, 'ЭК5 (закрытие вкладок)'));
         });
     },
-
 };
 const eok = {
     async establishCollapsedAreasAutoOpening() {
@@ -995,6 +1072,9 @@ const eok = {
             }
         });
     },
+    async setOrderClientsDataToStorage(json) {
+        
+    },
 };
 const preorder = {
     async resetRequestFilter() {
@@ -1019,7 +1099,6 @@ const preorder = {
         // requestFilterInput.dispatchEvent(new Event('keydown', {key: 'Enter'}));
         //findButton.dispatchEvent(new Event('click'));
     },
-
 };
 const messagerequest = {
     /* Create form */
@@ -1236,7 +1315,7 @@ const orderec5 = {
             const spanHeadline = claim(type.element, await pollingSelector(appTotalCostResult, 'span.headline-value'));
             const previousNumber = tools.getNumberOfCost(spanPrevious.innerText);
             const headlineNumber = tools.getNumberOfCost(spanHeadline.innerText);
-            let difference = headlineNumber - previousNumber + "";
+            let difference = (headlineNumber - previousNumber).toFixed(2) + "";
             if (difference[0] !== '-') difference = '+' + difference;
             spanPrevious.title = headlineNumber + ' - ' + previousNumber + ' = ' + difference;
         });
@@ -1248,7 +1327,7 @@ const orderec5 = {
 const gateway = {
     getOrderClients(orderId) {
         return gateway.request(
-            'GET', 'https://gateway.cdek.ru/single-advice-window/web/order-details/get-order-clients/' + orderId,
+            'GET', 'https://gateway.cdek.ru/single-advice-window/web/order-details/get-order-clients/' + orderId + '/',
             null, location.origin, tools.getAuthToken()
         );
     },
@@ -1259,16 +1338,16 @@ const gateway = {
                 "accept-language": "ru,en;q=0.9,en-GB;q=0.8,en-US;q=0.7",
                 "pwt": token,
                 //"sec-ch-ua": "\"Microsoft Edge\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
-                //"sec-ch-ua-mobile": "?0",
-                //"sec-ch-ua-platform": "\"Windows\"",
-                //"sec-fetch-dest": "empty",
-                //"sec-fetch-mode": "cors",
-                //"sec-fetch-site": "same-site",
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": "\"Windows\"",
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-site",
                 "x-auth-token": token,
                 "x-user-lang": "rus"
             },
-            //"referrer": referrer,
-            //"referrerPolicy": "strict-origin-when-cross-origin",
+            "referrer": referrer,
+            // "referrerPolicy": "strict-origin-when-cross-origin",
             "body": body,
             "method": method,
             "mode": "cors",
