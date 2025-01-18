@@ -18,6 +18,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_listValues
+// @grant        GM_deleteValues
 // @grant        GM_notification
 // @grant        GM_addValueChangeListener
 // @grant        GM_removeValueChangeListener
@@ -26,7 +27,8 @@
 // @grant        unsafeWindow
 // ==/UserScript==
 const context = {
-    domain: null, 
+    domain: null,
+    userscriptInjectionTimestamp: Date.now(),
 };
 const storage = {
     getValue(name) {
@@ -56,9 +58,19 @@ const storage = {
         storage.defineValueJSON('usercfg', onlyIfUndefined, {
 
         });
-        storage.defineValueJSON('singleadvicewindow', onlyIfUndefined, {
-
+        storage.defineValueJSON('smartAdviceWindow', onlyIfUndefined, {
+            orderClientsExtraData: [],
         });
+    },
+    getAll() {
+        const result = {};
+        for (let name of GM_listValues()) {
+            result[name] = storage.getValueJSON(name);
+        }
+        return result;
+    },
+    clear() {
+        GM_deleteValues(GM_listValues());
     },
 };
 const usercfg = {
@@ -89,6 +101,7 @@ const cfg = {
         softOrange: '#ffe2b7',
         orange: '#ffa000',
         bluegreen: '#069697',
+        bluegray: '#E8F1FC',
     },
     exception: {
         titles: {
@@ -206,6 +219,7 @@ const type = {
     object: item => type.of(item) === '[object object]',
     string: item => type.of(item) === '[object string]',
     notEmptyString: item => type.of(item) === '[object string]' && item.length > 0,
+    orderIDstring: item => type.string(item) && isFinite(item),
 };
 const tools = {
     defaultCatchCallback(title, error) {
@@ -250,11 +264,11 @@ const tools = {
         // Добавляем уведомление в контейнер
         notificationContainer.appendChild(notificationPopup);
     },
-    showError(message) {
-        tools._showNotification(message, '#ffe2b7');
+    showError(message, color='#ffe2b7') {
+        tools._showNotification(message, color);
     },
-    showMessage(message) {
-        tools._showNotification(message, '#BFD641');
+    showMessage(message, color='#BFD641') {
+        tools._showNotification(message, color);
     },
     getNumberOfCost(costString) {
         const dotified = costString.replace(',', '.');
@@ -282,32 +296,37 @@ const xhr = {
             return instance; 
         }
     },
+    establishXHRinterceptor() {
+        const isXHRinterceptingDomain = cfg.xhrInterceptingDomainWhiteList.includes(context.domain);
+        // подмена класса XHR на перехватчик
+        if (isXHRinterceptingDomain) unsafeWindow.XMLHttpRequest = xhr.Interceptor;
+    },
     loadendEvent(instance) {
         if (instance.responseURL.includes('get-order-clients')) {
-            qw(instance)
+            tools.runScriptIfActiveInUsercfg('ЕОК-smart: сохранение подробностей о клиентах', 'eokSmart-orderClientsResponseDataSaving', eok.saveOrderClientsResponseData.bind(eok, instance));
         }
-        // if (1||instance.__sentry_xhr__.body.includes('get-order-clients')) {
-        if (0&&instance.responseURL.includes('clients')) {
-            qw(JSON.parse(instance.responseText));
-        }
-            // qw(location.origin, instance.responseURL);
     },
 };
 const main = {
     async run() {
         context.domain = main.getDomainFromWhiteList(location.href, 'domainWhiteList');
         if (context.domain === false) return;
-        const isXHRinterceptingDomain = cfg.xhrInterceptingDomainWhiteList.includes(context.domain);
-        // подмена класса XHR на перехватчик
-        if (isXHRinterceptingDomain) unsafeWindow.XMLHttpRequest = xhr.Interceptor;
-        tooltip.injectCSS();
+        usercfg.loadFromStorage();
+        storage.mount(true);
+        tools.runScriptIfActiveInUsercfg('Перехват запрсосов', 'XHRinterceptor', xhr.establishXHRinterceptor.bind(xhr));
+        // tooltip.injectCSS();
         ctxmenu.injectCSS();
         //menu0.injectCSS();
         main.injectNotificationCSS();
         await main.injectNotificationDiv();
-        storage.mount(true);
-        usercfg.loadFromStorage();
         await main.manageScripts(context.domain);
+    },
+    injectSingleAdviceWindowCSS() {
+        GM_addStyle(`
+            optimism-opacity-hover:hover {
+                opacity: 0.7;
+            }
+        `);
     },
     async injectNotificationDiv() {
         const body = claim(type.element, await pollingSelector(document, 'body'));
@@ -359,8 +378,9 @@ const main = {
             await menu.establish();
             await tools.runScriptIfActiveInUsercfg('ЭК5 (закрытие вкладок)', 'EKtabClosingEventListener', ek5.establishEKtabClosingEventListener.bind(ek5));
         } else if (domain === 'smartadvicewindowng.cdek.ru') {
-            //gateway.getOrderClients('10069715766').then(l);
+            /* есть скрипт в перехвате запросов */
         } else if (domain === 'singleadvicewindowng.cdek.ru') {
+            // main.injectSingleAdviceWindowCSS();
             if (!location.href.includes('smartAdviceWindow')) { // старый ЕОК
                 await until(() => type.element(document.body));
                 tools.showMessage('Рекомендация для старого ЕОК: Откройте любой заказ в течение минуты для корректной работы пользовательского скрипта. Например: 10051234567');
@@ -369,7 +389,9 @@ const main = {
             await tools.runScriptIfActiveInUsercfg('ЕОК (окрашивание многоместных селектов)', 'multiplePlacesMarking', eok.markMultiplePlaces2.bind(eok));
             await tools.runScriptIfActiveInUsercfg('ЕОК (открытие вкладки сообщений-запросов)', 'notificationBlockMessagerequestTabAutoOpening', eok.establishNotificationBlockMessagerequestTabAutoOpening.bind(eok));
             await tools.runScriptIfActiveInUsercfg('ЕОК (кастомное контекстное меню)', 'eokContextMenuOnLinks', eok.establishContextMenuOnLinks.bind(eok));
-            //await eok.establishGatewayOrderClientsTooltips();
+            if (location.href.includes('smartAdviceWindow')) {
+                await tools.runScriptIfActiveInUsercfg('ЕОК (подсказки с подробностями о клиентах)', 'eokOrderClientsExtraDataTooltips', eok.establishOrderClientsExtraDataTooltips.bind(eok));
+            }           
         } else if (domain === 'preorderec5.cdek.ru' && !location.href.includes('gate.html')) {
             if (location.href.includes('journal')) {
                 await tools.runScriptIfActiveInUsercfg('Журнал заявок (очистка фильтра)', 'requestFilterReset', preorder.resetRequestFilter.bind(preorder));
@@ -408,7 +430,7 @@ const menu = {
     establish() {
         addSafeListener(document, 'keydown', 'ЭК5 (меню юзерскрипта)', event => {
             if (!event.altKey || event.key !== 'End' || event.repeat) return;
-            const mainChoice = menu.prompt(['Активация/деактивация скриптов', 'Настройки', 'Лог пользовательского конфига в консоль']);
+            const mainChoice = menu.prompt(['Активация/деактивация скриптов', 'Настройки', 'Лог хранилища в консоль', 'Лечение хранилища']);
             if (mainChoice === null) return
             if (mainChoice === 1) {
                 menu.scriptToggling();
@@ -419,7 +441,17 @@ const menu = {
                 return;
             }
             if (mainChoice === 3) {
-                console.log(usercfg.data)
+                console.log( storage.getAll() );
+                return;
+            }
+            if (mainChoice === 4) {
+                const choice = menu.prompt(['Монтировать хранилище без очистки (немонтируемые данные останутся без изменений)', 'Очистить хранилище и монтировать']);
+                const confirmed = confirm('Точно?');
+                if (!confirmed || choice === 0) return;
+                if (choice === 2) {
+                    storage.clear();
+                }
+                storage.mount(false);
                 return;
             }
         });
@@ -447,7 +479,10 @@ const menu = {
     },
     scriptToggling() {
         const scriptChoice = menu.prompt([
+            menu.get_isActive_prefix('XHRinterceptor') + 'Перехват запросов',
             menu.get_isActive_prefix('EKtabClosingEventListener') + 'ЭК5: Закрывать вкладки, если они просят закрытия',
+            menu.get_isActive_prefix('eokSmart-orderClientsResponseDataSaving') + 'ЕОК-smart: сохранение подробностей о клиентах',
+            menu.get_isActive_prefix('eokOrderClientsExtraDataTooltips') + 'ЕОК: подсказки с подробностями о клиентах',
             menu.get_isActive_prefix('collapsedAreasAutoOpening') + 'ЕОК: Автоматическое открытие областей об оплате и грузоместах',
             menu.get_isActive_prefix('multiplePlacesMarking') + 'ЕОК: Окрашивание селекта мест, если в заказе более 1 места',
             menu.get_isActive_prefix('notificationBlockMessagerequestTabAutoOpening') + 'ЕОК: Автоматическое открытие вкладки сообщений-запросов',
@@ -470,11 +505,14 @@ const menu = {
     toggleScriptInUsercfg(n) {
         n--;
         const scriptNames = [
-            'EKtabClosingEventListener', 'collapsedAreasAutoOpening', 'multiplePlacesMarking',
+            'XHRinterceptor', 'EKtabClosingEventListener', 'eokSmart-orderClientsResponseDataSaving', 
+            'eokOrderClientsExtraDataTooltips', 'collapsedAreasAutoOpening', 'multiplePlacesMarking',
             'notificationBlockMessagerequestTabAutoOpening', 'eokContextMenuOnLinks', 'requestFilterReset',
-            'requestFilterValueSet', 'messagerequestDefaultBranchChoosing', 'messagerequestCreateFormCompleteButtonsTabAutoClosing',
-            'companystructureEnterKeyExtraListener', 'coworkerEnterKeyExtraListener', 'calltaskSaveButtonTabAutoClosing',
-            'orderec5LathingExtraDeliveryDayNotification', 'orderec5TransportSchemeMemorization', 'orderec5SumDifferenceCalculation',
+            'requestFilterValueSet', 'messagerequestDefaultBranchChoosing', 
+            'messagerequestCreateFormCompleteButtonsTabAutoClosing','companystructureEnterKeyExtraListener', 
+            'coworkerEnterKeyExtraListener', 'calltaskSaveButtonTabAutoClosing',
+            'orderec5LathingExtraDeliveryDayNotification', 'orderec5TransportSchemeMemorization', 
+            'orderec5SumDifferenceCalculation',
         ];
         affirm(scriptNames.length > n, 'scriptNames содержит меньше имен, чем параметр n');
         if (usercfg.data[scriptNames[n]] === undefined) {
@@ -713,6 +751,7 @@ const ctxmenu = {
         }
         // Показываем меню
         showMenu(event) {
+            event.stopPropagation();
             event.preventDefault();
             this.ctxmenuEvent = event;
             this.menuElement.style.display = 'block';
@@ -727,6 +766,7 @@ const ctxmenu = {
         attachMenu(selector) {
             addSafeListener(document, 'click', 'Скрытие контекстного меню', () => this.hideMenu());
             addSafeListener(document, 'contextmenu', 'Открытие контекстного меню', event => {
+                event
                 if (event.ctrlKey && !event.repeat) return; // Ctrl+RMB открывает стандартное контекстное меню (на случае если в ЭК5 введут тоже меню)
                 // Проверяем, вызвано ли меню на нужном элементе
                 if (event.target.closest(selector)) this.showMenu(event);
@@ -1032,48 +1072,109 @@ const eok = {
             }]);
         });
     },
-    async establishGatewayOrderClientsTooltips() { // типы контрагентов, время, регион
+    saveOrderClientsResponseData(xhrInstance) {
+        affirm(xhrInstance.status === 200, 'Сервер не ответил: подробности о клиентах');
+        const response = JSON.parse(xhrInstance.responseText);
+        const orderID = claim(type.orderIDstring, xhrInstance.responseURL.split('/').pop());
+        // let isOrderClientsExtraDataSizeLimitReached = false;
+        storage.editObject('smartAdviceWindow', smartAdviceWindow => {
+            if (smartAdviceWindow.orderClientsExtraData.length > 16) {
+                tools.showError(
+                    'Предупреждение: повышенное использование хранилища скрипта ' +
+                    '(smartAdviceWindow.orderClientsExtraData). ' +
+                    'Просьба передать Антону.'
+                );
+            }
+            const notExpiredData = smartAdviceWindow.orderClientsExtraData.filter(item => {
+                if (context.userscriptInjectionTimestamp - item.timestamp < 60000) return true; // более минуты
+            });
+            smartAdviceWindow.orderClientsExtraData = notExpiredData;
+            smartAdviceWindow.orderClientsExtraData.push({
+                orderID,
+                timestamp: Date.now(),
+                sender: {
+                    country: claim(type.string, response?.sender?.country?.name),
+                    region: claim(type.string, response?.sender?.region?.name),
+                    city: claim(type.string, response?.sender?.city?.name),
+                    timeZone: claim(type.string, response?.sender?.timeZone),
+                    contragentType: claim(type.string, response?.sender?.contragentType),
+                },
+                receiver: {
+                    country: claim(type.string, response?.receiver?.country?.name),
+                    region: claim(type.string, response?.receiver?.region?.name),
+                    city: claim(type.string, response?.receiver?.city?.name),
+                    timeZone: claim(type.string, response?.receiver?.timeZone),
+                    contragentType: claim(type.string, response?.receiver?.contragentType),
+                },
+            });
+        });
+    },
+    async establishOrderClientsExtraDataTooltips() {
         const body = await pollingSelector(document, 'body');
         addSafeObserver(body, {
             attributes: true,
             attributeOldValue: true
-        }, 'ЕОК (всплывающие подсказки: тип контрагента, регион, местное время)', async records => {
+        }, 'ЕОК (открытие областей оплаты и истории мест)', async records => {
             if (records[0].oldValue !== 'overflowHidden') return;
-            const itemDivs = claim(type.nodeList, await pollingSelectorAll(document, 'div.item', 1));
-            let orderItemDiv;
-            for (let div of itemDivs) {
-                if (div.innerText.includes('Заказ')) {
-                    orderItemDiv = div;
-                    break;
-                }
+            
+            /* определение номера заказа */
+
+            const orderIDinput = claim(type.element, await pollingSelector(
+                document, 'cdek-input[formcontrolname=orderNumber] input'
+            ));
+            const orderID = claim(type.orderIDstring, orderIDinput.value);
+
+            /* проверяем, а есть ли подходящий orderClientsExtraData */
+
+            let suitableData;
+            storage.editObject('smartAdviceWindow', smartAdviceWindow => {
+                const notExpiredData = smartAdviceWindow.orderClientsExtraData.filter(item => {
+                    if (context.userscriptInjectionTimestamp - item.timestamp < 60000) return true; // более минуты
+                });
+                suitableData = notExpiredData.filter(item => {
+                    if (item.orderID === orderID) return true;
+                });
+                smartAdviceWindow.orderClientsExtraData = notExpiredData;
+            });
+            if (suitableData.length === 0) {
+                tools.showError('Актуальные подробности о клиентах для этого заказа не найдены (физ/юр и др.).');
+                return;
             }
-            affirm(type.element(orderItemDiv), 'Не найден блок "Заказ..."');
-            const splitted = orderItemDiv.innerText.split('\n');
-            affirm(splitted.length === 2, 'Не удалось извлечь номер заказа');
-            const orderIdString = claim(isFinite, splitted[1]);
-            const response = await gateway.getOrderClients('10047118293'/*orderIdString*/);
-            const data = await response.json();
-            const cardDivs = claim(type.nodeList, await pollingSelectorAll(document, 'div.card', 2));
-            let senderCardDiv, receiverCardDiv;
-            for (let div of cardDivs) {
-                if (div.innerText.includes('Отправитель')) senderCardDiv = div;
-                if (div.innerText.includes('Получатель')) receiverCardDiv = div;
+            suitableData.sort((a,b) => b.timestamp - a.timestamp); // первый будет самым поздно записанным
+
+            /* добавляем title-атрибуты */
+
+            const cards = claim(type.nodeList, await pollingSelectorAll(
+                document, 'div.cards div.card', 2
+            ));
+            affirm(cards[0].innerText.includes('Отправитель'), 'Не найден блок "Отправитель"');
+            affirm(cards[1].innerText.includes('Получатель'), 'Не найден блок "Получатель"');
+            const clientsStrings = [['sender','об отправителе','Отправитель'], ['receiver','о получателе','Получатель']];
+            const contragentTypeStrings = { FIZ: 'Физ. лицо', UR: 'Юр. лицо' };
+            for (let iter = 0; iter < 2; iter++) {
+                const client = suitableData[0][ clientsStrings[iter][0] ];
+                const staticPart = ' ----- ' + contragentTypeStrings[client.contragentType] + ' ----- ' + 
+                client.city + ', ' + client.region + ', ' + client.country;
+                addSafeListener(cards[iter], 'dblclick', 'Двойной клик по блоку клиента в ЕОК', () => {
+                    const time = (new Date).toLocaleTimeString('ru', {
+                        timeZone: client.timeZone
+                    })
+                    tools.showMessage(
+                        clientsStrings[iter][2] + ' ----- ' +
+                        time + staticPart, cfg.color.bluegray
+                    );
+                });
             }
-            affirm(type.element(senderCardDiv), 'Не найден блок Отправитель');
-            affirm(type.element(receiverCardDiv), 'Не найден блок Получатель');
-            const elements = {sender: {}, receiver: {}};
-            const senderNameSpans = claim(type.nodeList, await pollingSelectorAll(senderCardDiv, 'span.name', 1));
-            const receiverNameSpans = claim(type.nodeList, await pollingSelectorAll(receiverCardDiv, 'span.name', 1));
-            for (let span of senderNameSpans) {
-                if (span.innerText.includes('Контрагент')) {
-                    span.title = data.sender.contragentType
-                    return
-                }
-            }
+            // const clients = ['sender', 'receiver'];
+            // for (let iter = 0; iter < 2; iter++) {
+            //     const spans = claim(type.nodeList, await pollingSelectorAll(
+            //         cards[iter], 'span.name', 5
+            //     ));
+            //     for (let span of spans) {
+
+            //     }
+            // }
         });
-    },
-    async setOrderClientsDataToStorage(json) {
-        
     },
 };
 const preorder = {
@@ -1325,12 +1426,6 @@ const orderec5 = {
     },
 };
 const gateway = {
-    getOrderClients(orderId) {
-        return gateway.request(
-            'GET', 'https://gateway.cdek.ru/single-advice-window/web/order-details/get-order-clients/' + orderId + '/',
-            null, location.origin, tools.getAuthToken()
-        );
-    },
     async request(method, url, body, referrer, token) {
         const response = await fetch(url, {
             "headers": {
