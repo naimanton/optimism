@@ -1066,7 +1066,7 @@ const messagerequest = {
     async _chooseOfficeAndWaitGroupLoading(nogroup, groupName) {
         const officeCtrl0 = claim(type.element, await pollingSelector(document, '#officeCtrl_0'));
         const input = claim(type.element, await pollingSelector(officeCtrl0, 'input'));
-        input.value = 'сервис';
+        input.value = 'NSK76';
         input.dispatchEvent(new Event('input', {
             bubbles: true
         }));
@@ -1074,10 +1074,10 @@ const messagerequest = {
             bubbles: true
         }));
         const dropdowns = claim(type.nodeList, await pollingSelectorAll(document, 'cdek-dropdown', 4));
-        await until(() => dropdowns[0].parentElement.innerText.includes('ервисна'));
+        await until(() => dropdowns[0].parentElement.innerText.includes('NSK76'));
         let officeDropdown;
         for (let dropdown of dropdowns) {
-            if (dropdown.innerText.includes('ервисна')) {
+            if (dropdown.innerText.includes('NSK76')) {
                 officeDropdown = dropdown;
             }
         }
