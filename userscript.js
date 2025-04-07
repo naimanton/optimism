@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         optimism: cdek/contact-centre
 // @namespace    http://tampermonkey.net/
-// @version      2024-12-07
+// @version      2025.04.07
 // @description  workflow optimisation for ek5 and contact-centre
 // @author       Ton
 // @match        https://ek5.cdek.ru/*
@@ -48,6 +48,11 @@ const cfg = {
         softOrange: '#ffe2b7',
         orange: '#ffa000',
         bluegreen: '#069697',
+    },
+    exception: {
+        titles: {
+
+        },
     },
 };
 const l = console.log;
@@ -307,9 +312,7 @@ const main = {
         } else if (domain === 'coworker.cdek.ru') {
             await tools.runScriptIfActiveInUsercfg('Сотрудник (Enter в поле кода офиса выбирает 1-ый офис, нажимает Найти и очищает фильтр)', 'coworkerEnterKeyExtraListener', coworker.establishEnterKeyExtraListener.bind(coworker));
         } else if (domain === 'orderec5ng.cdek.ru') {
-            if (location.href.includes('ourna')) {
-            }
-            else {
+            if (location.href.includes('create') || location.href.includes('open')) {
                 await tools.runScriptIfActiveInUsercfg('Создание/редактирование заказа (предупреждение: обрешетка увеличивает срок доставки на 1 день)', 'orderec5LathingExtraDeliveryDayNotification', orderec5.establishLathingExtraDeliveryDayNotification.bind(orderec5));
                 await tools.runScriptIfActiveInUsercfg('Создание/редактирование заказа: авиапризнаки запоминаются в подсказки', 'orderec5TransportSchemeMemorization', orderec5.establishTransportSchemeMemorization.bind(orderec5));
                 await tools.runScriptIfActiveInUsercfg('Создание/редактирование заказа: разность сумм при внесении изменений', 'orderec5SumDifferenceCalculation', orderec5.establishSumDifferenceCalculation.bind(orderec5));
@@ -1024,12 +1027,12 @@ const messagerequest = {
         addSafeListener(document.body, 'dblclick', 'Форма создания СЗ (автовыбор ветви)', async event => {
             const way = usercfg?.data?.settings?.messagerequestDefaultBranchChoosing?.menuOpeningWay || 2; // если способ не выбирался, то по умолчанию 2 - alt+dblclick
             const extraKeyWay = way !== 1;
-            if (extraKeyWay && (!event.altKey && !event.ctrlKey)) return;
-            if (way === 2 && !event.altKey) return;
-            else if (way === 3 && !event.ctrlKey) return;
+            if (extraKeyWay && (!event.altKey && !event.ctrlKey)) return; // если доп.клавиша нужна, но ни ctrl, ни alt не нажаты > выход
+            if (way === 2 && !event.altKey) return; // нажат ctrl, а надо alt > выход
+            else if (way === 3 && !event.ctrlKey) return; // нажат alt, а надо ctrl > выход
             const choice = menu.prompt([
-                'НСК > CК > Претензии от операторов', 'НСК > CК > Заявки на изменения накладной',
-                'НСК > CК > Запрос документов', 'НСК > CК > Сопровождение Китайских франчайзи', 'НСК > CК > Отключение уведомлений'
+                'НСК > NSK76 > Претензии от операторов', 'НСК > NSK76 > Заявки на изменения накладной',
+                'НСК > NSK76 > Запрос документов', 'НСК > NSK76 > Сопровождение Китайских франчайзи', 'НСК > NSK76 > Отключение уведомлений'
             ]);
             if (choice === 0) return;
             else if (choice === 1) {
@@ -1063,7 +1066,7 @@ const messagerequest = {
     async _chooseOfficeAndWaitGroupLoading(nogroup, groupName) {
         const officeCtrl0 = claim(type.element, await pollingSelector(document, '#officeCtrl_0'));
         const input = claim(type.element, await pollingSelector(officeCtrl0, 'input'));
-        input.value = 'сервис';
+        input.value = 'NSK76';
         input.dispatchEvent(new Event('input', {
             bubbles: true
         }));
@@ -1071,10 +1074,10 @@ const messagerequest = {
             bubbles: true
         }));
         const dropdowns = claim(type.nodeList, await pollingSelectorAll(document, 'cdek-dropdown', 4));
-        await until(() => dropdowns[0].parentElement.innerText.includes('ервисна'));
+        await until(() => dropdowns[0].parentElement.innerText.includes('NSK76'));
         let officeDropdown;
         for (let dropdown of dropdowns) {
-            if (dropdown.innerText.includes('ервисна')) {
+            if (dropdown.innerText.includes('NSK76')) {
                 officeDropdown = dropdown;
             }
         }
@@ -1143,9 +1146,11 @@ const companystructure = {
         affirm(type.element(officeCodeDiv), 'Не обнаружен officeCodeDiv');
         const agCenterColsClipper = claim(type.element, await pollingSelector(document, '.ag-center-cols-clipper'));
         addSafeListener(officeCodeDiv, 'keydown', 'Офисы (Enter в поле кода офиса нажимает Найти и очищает фильтр)', async event => {
-            const officeCode = event.target.value;
+            const officeCode = event.target.value.toUpperCase();
             if (event.key !== 'Enter' || event.repeat) return;
-            await until(() => event.target.value.length === 0);
+            const divSibling = claim(type.element, event.target.nextElementSibling);
+            const totalCountSpan = claim(type.element, await pollingSelector(divSibling, '.total-count'));
+            await until(() => totalCountSpan.innerText !== '0');
             findButton.dispatchEvent(new Event('click'));
             await until(() => agCenterColsClipper.innerText.includes(officeCode));
             cleanButton.dispatchEvent(new Event('click'));
