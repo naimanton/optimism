@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         optimism: cdek/contact-centre
 // @namespace    http://tampermonkey.net/
-// @version      2024-12-15
+// @version      2025.04.07
 // @description  workflow optimisation for ek5 and contact-centre
 // @author       Ton
 // @match        https://ek5.cdek.ru/*
@@ -9,7 +9,7 @@
 // @match        https://preorderec5.cdek.ru/*
 // @match        https://calltaskfrontng.cdek.ru/*
 // @match        https://singleadvicewindowng.cdek.ru/*
-// match        https://smartadvicewindowng.cdek.ru/*
+// @match        https://smartadvicewindowng.cdek.ru/*
 // @match        https://messagerequestscreateformng.cdek.ru/*
 // @match        https://companystructurefrontng.cdek.ru/*
 // @match        https://coworker.cdek.ru/*
@@ -40,7 +40,7 @@ const usercfg = {
 };
 const cfg = {
     domainWhiteList: [
-        'svvs.contact-centre.ru', 'ek5.cdek.ru', 'preorderec5.cdek.ru', 'singleadvicewindowng.cdek.ru', /*'smartadvicewindowng.cdek.ru',*/
+        'svvs.contact-centre.ru', 'ek5.cdek.ru', 'preorderec5.cdek.ru', 'singleadvicewindowng.cdek.ru', 'smartadvicewindowng.cdek.ru',
         'messagerequestscreateformng.cdek.ru', 'companystructurefrontng.cdek.ru', 'coworker.cdek.ru', 'calltaskfrontng.cdek.ru', 'orderec5ng.cdek.ru'
     ],
     color: {
@@ -281,7 +281,7 @@ const main = {
             await menu.establish();
             await tools.runScriptIfActiveInUsercfg('ЭК5 (закрытие вкладок)', 'EKtabClosingEventListener', ek5.establishEKtabClosingEventListener.bind(ek5));
         } else if (domain === 'smartadvicewindowng.cdek.ru') {
-
+            await tools.runScriptIfActiveInUsercfg('ЕОК - 3 версия (корректировка стилей)', '3versionEokStyleCorrection', eok.establish3versionEokStyleCorrection.bind(eok));
         } else if (domain === 'singleadvicewindowng.cdek.ru') {
             if (!location.href.includes('smartAdviceWindow')) { // старый ЕОК
                 await until(() => type.element(document.body));
@@ -374,6 +374,7 @@ const menu = {
             menu.get_isActive_prefix('multiplePlacesMarking') + 'ЕОК: Окрашивание селекта мест, если в заказе более 1 места',
             menu.get_isActive_prefix('notificationBlockMessagerequestTabAutoOpening') + 'ЕОК: Автоматическое открытие вкладки сообщений-запросов',
             menu.get_isActive_prefix('eokContextMenuOnLinks') + 'ЕОК: Контекстное меню для копирования текста ссылочных элементов',
+            menu.get_isActive_prefix('3versionEokStyleCorrection') + 'ЕОК (3 версия) - корректировка стилей',
             menu.get_isActive_prefix('requestFilterReset') + 'Журнал заявок: Автоматический сброс фильтров',
             menu.get_isActive_prefix('requestFilterValueSet') + '[Не доступен] Журнал заявок: Инъекция идентификатора заявки в поле фильтра',
             menu.get_isActive_prefix('messagerequestDefaultBranchChoosing') + 'Форма создания СЗ: Alt + Двойной клик открывает меню выбора ветви',
@@ -393,7 +394,7 @@ const menu = {
         n--;
         const scriptNames = [
             'EKtabClosingEventListener', 'collapsedAreasAutoOpening', 'multiplePlacesMarking',
-            'notificationBlockMessagerequestTabAutoOpening', 'eokContextMenuOnLinks', 'requestFilterReset',
+            'notificationBlockMessagerequestTabAutoOpening', 'eokContextMenuOnLinks', '3versionEokStyleCorrection', 'requestFilterReset',
             'requestFilterValueSet', 'messagerequestDefaultBranchChoosing', 'messagerequestCreateFormCompleteButtonsTabAutoClosing',
             'companystructureEnterKeyExtraListener', 'coworkerEnterKeyExtraListener', 'calltaskSaveButtonTabAutoClosing',
             'orderec5LathingExtraDeliveryDayNotification', 'orderec5TransportSchemeMemorization', 'orderec5SumDifferenceCalculation',
@@ -995,6 +996,35 @@ const eok = {
             }
         });
     },
+    async establish3versionEokStyleCorrection() {
+        const appMainWrapper = await pollingSelector(document, 'app-main-wrapper');
+        addSafeObserver(appMainWrapper, {childList: true}, 'ЕОК - 3 версия (корректировка стилей)', async records => {
+            const appOrder = appMainWrapper.querySelector('app-order');
+            if (appOrder === null) return;
+            const orderPage_order = await pollingSelector(document, '.order-page__order');
+            const orderPageComponents = await pollingSelectorAll(orderPage_order, '.order-page__component', 5);
+            const components = [
+                ...orderPageComponents,
+                await pollingSelector(orderPage_order, '.special-conditions'),
+                await pollingSelector(orderPage_order, '.places'),
+                await pollingSelector(orderPage_order, '.changes'),
+                await pollingSelector(orderPage_order, '.appeals'),
+                await pollingSelector(orderPage_order, '.notifications'),
+                await pollingSelector(orderPage_order, '.scans'),
+            ];
+            for (let component of components) {
+                component.style.border = '1px solid gray';
+                component.style.borderRadius = '20px';
+            }
+            //const appTransportSchemeWrapper = await pollingSelector(orderPage_order, 'app-transport-scheme-wrapper');
+            //const transportSchemeSegments = await pollingSelectorAll(appTransportSchemeWrapper, '.segment', 1);
+            //qw({l:transportSchemeSegments.length})
+            //for (let segment of transportSchemeSegments) {
+            //    segment.style.borderBottom = '1px dashed black';
+            //}
+            //orderPage_order.style.display = 'block';
+        });
+    },
 };
 const preorder = {
     async resetRequestFilter() {
@@ -1031,8 +1061,8 @@ const messagerequest = {
             if (way === 2 && !event.altKey) return; // нажат ctrl, а надо alt > выход
             else if (way === 3 && !event.ctrlKey) return; // нажат alt, а надо ctrl > выход
             const choice = menu.prompt([
-                'НСК > CК > Претензии от операторов', 'НСК > CК > Заявки на изменения накладной',
-                'НСК > CК > Запрос документов', 'НСК > CК > Сопровождение Китайских франчайзи', 'НСК > CК > Отключение уведомлений'
+                'НСК > NSK76 > Претензии от операторов', 'НСК > NSK76 > Заявки на изменения накладной',
+                'НСК > NSK76 > Запрос документов', 'НСК > NSK76 > Сопровождение Китайских франчайзи', 'НСК > NSK76 > Отключение уведомлений'
             ]);
             if (choice === 0) return;
             else if (choice === 1) {
@@ -1066,7 +1096,7 @@ const messagerequest = {
     async _chooseOfficeAndWaitGroupLoading(nogroup, groupName) {
         const officeCtrl0 = claim(type.element, await pollingSelector(document, '#officeCtrl_0'));
         const input = claim(type.element, await pollingSelector(officeCtrl0, 'input'));
-        input.value = 'сервис';
+        input.value = 'NSK76';
         input.dispatchEvent(new Event('input', {
             bubbles: true
         }));
@@ -1074,10 +1104,10 @@ const messagerequest = {
             bubbles: true
         }));
         const dropdowns = claim(type.nodeList, await pollingSelectorAll(document, 'cdek-dropdown', 4));
-        await until(() => dropdowns[0].parentElement.innerText.includes('ервисна'));
+        await until(() => dropdowns[0].parentElement.innerText.includes('NSK76'));
         let officeDropdown;
         for (let dropdown of dropdowns) {
-            if (dropdown.innerText.includes('ервисна')) {
+            if (dropdown.innerText.includes('NSK76')) {
                 officeDropdown = dropdown;
             }
         }
